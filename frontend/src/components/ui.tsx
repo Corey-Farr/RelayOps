@@ -1,15 +1,210 @@
-import {createContext,useContext,useState,type ReactNode,Component,type ErrorInfo} from 'react';
-import {useMutation,useQueryClient} from '@tanstack/react-query';
-import {api} from '../services/api';
-const ToastContext=createContext<(text:string)=>void>(()=>{});
-export function ToastProvider({children}:{children:ReactNode}) { const [message,setMessage]=useState(''); return <ToastContext.Provider value={setMessage}>{children}{message&&<div className="toast" role="status">{message}<button aria-label="Dismiss notification" onClick={()=>setMessage('')}>×</button></div>}</ToastContext.Provider>; }
-export function useAction(path:string, method='POST') { const client=useQueryClient();const toast=useContext(ToastContext); return useMutation({mutationFn:(body?:unknown)=>api(path,method,body),onSuccess:()=>{void client.invalidateQueries();toast('Change saved successfully.');},onError:(e:Error)=>toast(e.message)}); }
-export function Status({value}:{value:string}) {return <span className={`status ${value}`}>{value.replaceAll('_',' ')}</span>;}
-export function Empty({children='No records yet. Data will appear as events flow through your system.'}:{children?:ReactNode}) {return <div className="empty"><span className="empty-icon">◎</span><p>{children}</p></div>;}
-export function Loading(){return <div aria-label="Loading" className="skeletons"><div/><div/><div/></div>;}
-export function Failure({error,retry}:{error:Error;retry?:()=>void}){return <div role="alert" className="error"><strong>Unable to load this view</strong><p>{error.message}</p>{retry&&<button onClick={retry}>Try again</button>}</div>;}
-export function PageTitle({eyebrow='OPERATIONS',title,description,children}:{eyebrow?:string;title:string;description:string;children?:ReactNode}) {return <header className="page-title"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{description}</p></div>{children}</header>;}
-export function ConfirmButton({children,onConfirm,disabled=false}:{children:ReactNode;onConfirm:()=>void;disabled?:boolean}){const [open,setOpen]=useState(false);return <><button disabled={disabled} onClick={()=>setOpen(true)}>{children}</button>{open&&<div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="confirm-title" className="modal"><h2 id="confirm-title">Confirm {children}</h2><p>This changes live system state. Continue with this action?</p><div className="actions"><button autoFocus onClick={()=>setOpen(false)}>Cancel</button><button className="primary" onClick={()=>{onConfirm();setOpen(false);}}>Confirm</button></div></section></div>}</>;}
-export class ErrorBoundary extends Component<{children:ReactNode},{error:Error|null}>{state={error:null as Error|null};static getDerivedStateFromError(error:Error){return {error};}componentDidCatch(error:Error,info:ErrorInfo){console.error('Console rendering failed',error.message,info.componentStack);}render(){return this.state.error?<Failure error={this.state.error} retry={()=>window.location.reload()}/>:this.props.children;}}
-export function Json({value}:{value:unknown}){return <pre>{JSON.stringify(value,null,2)}</pre>;}
-export function Pager({page,setPage,total,size=10}:{page:number;setPage:(n:number)=>void;total:number;size?:number}){return <div className="pager"><span>{total} records · Page {page+1} of {Math.max(1,Math.ceil(total/size))}</span><div><button disabled={page===0} onClick={()=>setPage(page-1)}>Previous</button><button disabled={(page+1)*size>=total} onClick={()=>setPage(page+1)}>Next</button></div></div>;}
+import {
+  createContext,
+  useContext,
+  useState,
+  type ReactNode,
+  Component,
+  type ErrorInfo,
+} from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../services/api";
+const ToastContext = createContext<(text: string) => void>(() => {});
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [message, setMessage] = useState("");
+  return (
+    <ToastContext.Provider value={setMessage}>
+      {children}
+      {message && (
+        <div className="toast" role="status">
+          {message}
+          <button
+            aria-label="Dismiss notification"
+            onClick={() => setMessage("")}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </ToastContext.Provider>
+  );
+}
+export function useAction(path: string, method = "POST") {
+  const client = useQueryClient();
+  const toast = useContext(ToastContext);
+  return useMutation({
+    mutationFn: (body?: unknown) => api(path, method, body),
+    onSuccess: () => {
+      void client.invalidateQueries();
+      toast("Change saved successfully.");
+    },
+    onError: (e: Error) => toast(e.message),
+  });
+}
+export function Status({ value }: { value: string }) {
+  return (
+    <span className={`status ${value}`}>{value.replaceAll("_", " ")}</span>
+  );
+}
+export function Empty({
+  children = "No records yet. Data will appear as events flow through your system.",
+}: {
+  children?: ReactNode;
+}) {
+  return (
+    <div className="empty">
+      <span className="empty-icon">◎</span>
+      <p>{children}</p>
+    </div>
+  );
+}
+export function Loading() {
+  return (
+    <div aria-label="Loading" className="skeletons">
+      <div />
+      <div />
+      <div />
+    </div>
+  );
+}
+export function Failure({
+  error,
+  retry,
+}: {
+  error: Error;
+  retry?: () => void;
+}) {
+  return (
+    <div role="alert" className="error">
+      <strong>Unable to load this view</strong>
+      <p>{error.message}</p>
+      {retry && <button onClick={retry}>Try again</button>}
+    </div>
+  );
+}
+export function PageTitle({
+  eyebrow = "OPERATIONS",
+  title,
+  description,
+  children,
+}: {
+  eyebrow?: string;
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <header className="page-title">
+      <div>
+        <div className="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {children}
+    </header>
+  );
+}
+export function ConfirmButton({
+  children,
+  onConfirm,
+  disabled = false,
+}: {
+  children: ReactNode;
+  onConfirm: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button disabled={disabled} onClick={() => setOpen(true)}>
+        {children}
+      </button>
+      {open && (
+        <div className="modal-backdrop">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-title"
+            className="modal"
+          >
+            <h2 id="confirm-title">Confirm {children}</h2>
+            <p>This changes live system state. Continue with this action?</p>
+            <div className="actions">
+              <button autoFocus onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className="primary"
+                onClick={() => {
+                  onConfirm();
+                  setOpen(false);
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+export class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(
+      "Console rendering failed",
+      error.message,
+      info.componentStack,
+    );
+  }
+  render() {
+    return this.state.error ? (
+      <Failure
+        error={this.state.error}
+        retry={() => window.location.reload()}
+      />
+    ) : (
+      this.props.children
+    );
+  }
+}
+export function Json({ value }: { value: unknown }) {
+  return <pre>{JSON.stringify(value, null, 2)}</pre>;
+}
+export function Pager({
+  page,
+  setPage,
+  total,
+  size = 10,
+}: {
+  page: number;
+  setPage: (n: number) => void;
+  total: number;
+  size?: number;
+}) {
+  return (
+    <div className="pager">
+      <span>
+        {total} records · Page {page + 1} of{" "}
+        {Math.max(1, Math.ceil(total / size))}
+      </span>
+      <div>
+        <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+          Previous
+        </button>
+        <button
+          disabled={(page + 1) * size >= total}
+          onClick={() => setPage(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
