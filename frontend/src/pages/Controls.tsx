@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, percent, stamp } from "../services/api";
 import {
@@ -581,25 +582,157 @@ function Destinations({ projectId }: { projectId: string }) {
     </section>
   );
 }
+export function DestinationPage() {
+  const projects = useData("/projects");
+  const [project, setProject] = useState("");
+  const selected = project || projects.data?.[0]?.id || "";
+  return (
+    <>
+      <PageTitle
+        title="Destinations"
+        description="Manage subscriptions, inspect delivery health, and send real test events."
+      />
+      {projects.isPending ? (
+        <Loading />
+      ) : projects.error ? (
+        <Failure error={projects.error} />
+      ) : (
+        <label>
+          Destination project
+          <select value={selected} onChange={(e) => setProject(e.target.value)}>
+            {projects.data.map((p: any) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {selected ? (
+        <Destinations projectId={selected} />
+      ) : (
+        <Empty>Create a project in Settings to add destinations.</Empty>
+      )}
+    </>
+  );
+}
 function Destination({ d }: { d: any }) {
   const toggle = useAction(`/destinations/${d.id}`, "PATCH");
+  const health = useData(`/destinations/${d.id}/health`);
+  const test = useAction(`/destinations/${d.id}/test`);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(d.name);
+  const [url, setUrl] = useState(d.url);
+  const [types, setTypes] = useState(d.event_types.join(", "));
   return (
-    <div className="list-item">
-      <div>
-        <h3>{d.name}</h3>
-        <p>{d.url}</p>
-        <small>Subscriptions: {d.event_types.join(", ")}</small>
+    <section className="panel">
+      <div className="list-item">
+        <div>
+          <h3>{d.name}</h3>
+          <p>{d.url}</p>
+          <small>Subscriptions: {d.event_types.join(", ")}</small>
+        </div>
+        <div className="actions">
+          <Status value={d.enabled ? "enabled" : "disabled"} />
+          <ConfirmButton
+            disabled={toggle.isPending}
+            onConfirm={() => toggle.mutate({ enabled: !d.enabled })}
+          >
+            {d.enabled ? "Disable destination" : "Enable destination"}
+          </ConfirmButton>
+        </div>
       </div>
       <div className="actions">
-        <Status value={d.enabled ? "enabled" : "disabled"} />
-        <ConfirmButton
-          disabled={toggle.isPending}
-          onConfirm={() => toggle.mutate({ enabled: !d.enabled })}
+        <button onClick={() => setEditing(!editing)}>
+          {editing ? "Cancel editing" : "Edit destination"}
+        </button>
+        <button
+          disabled={!d.enabled || test.isPending}
+          onClick={() => test.mutate(undefined)}
         >
-          {d.enabled ? "Disable destination" : "Enable destination"}
-        </ConfirmButton>
+          Send test event
+        </button>
+        {test.data && (
+          <Link to={`/events/${test.data.id}`}>Inspect test delivery</Link>
+        )}
       </div>
-    </div>
+      {editing && (
+        <form
+          className="form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            toggle.mutate(
+              {
+                name,
+                url,
+                event_types: types
+                  .split(",")
+                  .map((v: string) => v.trim())
+                  .filter(Boolean),
+              },
+              { onSuccess: () => setEditing(false) },
+            );
+          }}
+        >
+          <label>
+            Destination name
+            <input
+              required
+              maxLength={100}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <label>
+            Destination URL
+            <input
+              required
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            Event subscriptions
+            <input
+              required
+              value={types}
+              onChange={(e) => setTypes(e.target.value)}
+            />
+          </label>
+          <button disabled={toggle.isPending}>Save destination</button>
+        </form>
+      )}
+      {health.isPending ? (
+        <Loading />
+      ) : health.error ? (
+        <Failure error={health.error} />
+      ) : (
+        <>
+          <p>Terminal delivery success: {percent(health.data.success_rate)}</p>
+          <div className="actions">
+            {Object.entries(health.data.counts).map(([status, count]) => (
+              <span key={status}>
+                {status}: {String(count)}
+              </span>
+            ))}
+          </div>
+          <h4>Recent failed attempts</h4>
+          {health.data.recent_failures.length ? (
+            health.data.recent_failures.map((a: any) => (
+              <p key={a.id}>
+                <Link to={`/events/${a.event_id}`}>
+                  {a.http_status || a.failure_category}
+                </Link>{" "}
+                · {stamp(a.started_at)} · {a.worker_id}
+              </p>
+            ))
+          ) : (
+            <p>No recorded failed attempts.</p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 function Keys({ projectId }: { projectId: string }) {

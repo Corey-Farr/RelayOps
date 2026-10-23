@@ -12,6 +12,8 @@ async def identity(request: Request, db=Depends(session)):
     if not saved or saved.expires_at <= now():
         raise HTTPException(401, "Authentication required")
     user = await db.get(User, saved.user_id)
+    if user is None or user.role not in {"admin", "operator", "viewer"}:
+        raise HTTPException(401, "Account is unavailable")
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         supplied = request.headers.get("X-CSRF-Token", "")
         if not hmac.compare_digest(saved.csrf, supplied):

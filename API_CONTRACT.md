@@ -9,6 +9,15 @@ start timestamp, trace ID and `outcome_recorded`. A dispatch intent without a
 completion is an unknown outcome, not an observed failure. Redrive resets the
 bounded retry-cycle counter while retaining historical attempt numbers.
 
+Destination updates also accept a validated `url`. GET
+`/destinations/{id}/health` returns `{counts, success_rate, recent_failures}`;
+POST `/destinations/{id}/test` creates one real event/job for that enabled
+destination only, using one of its subscriptions. The event is inspectable through
+the normal explorer and retains its audit record. Worker pools additionally expose
+`active_worker_count`, `assigned_queue_depth`, `attempts_last_30m` and
+`failover_attempts_last_30m`. Overview includes `active_incidents`, `recent_events`
+and measured `p99_latency_ms`.
+
 - POST `/auth/login` `{email,password}`; POST `/auth/logout`; GET `/auth/me`.
 - GET `/projects` -> `[{id,name,created_at}]`; POST `/projects` `{name}`.
 - GET `/projects/{id}/keys` -> `[{id,name,prefix,created_at,revoked_at}]`; POST same `{name}` -> `{id,key}` (only reveal); DELETE `/keys/{id}`.

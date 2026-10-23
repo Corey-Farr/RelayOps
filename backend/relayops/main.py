@@ -117,6 +117,14 @@ async def prometheus(db=Depends(session)):
 async def login(body: LoginIn, request: Request, response: Response, db=Depends(session)):
     host = request.client.host if request.client else "unknown"
     clock = time.monotonic()
+    for address in list(login_attempts):
+        window = login_attempts[address]
+        while window and window[0] < clock - 60:
+            window.popleft()
+        if not window:
+            del login_attempts[address]
+    if host not in login_attempts and len(login_attempts) >= 10000:
+        raise HTTPException(429, "Authentication capacity exceeded", headers={"Retry-After": "60"})
     attempts = login_attempts[host]
     while attempts and attempts[0] < clock - 60:
         attempts.popleft()
@@ -223,6 +231,53 @@ async def destinations(project_id: str | None = None, user=Depends(identity), db
     return [serialize(d, ("secret_encrypted",)) for d in (await db.scalars(query)).all()]
 
 
+@app.get("/api/destinations/{identifier}/health")
+async def destination_health(identifier: str, user=Depends(identity), db=Depends(session)):
+    await required(db, Destination, identifier)
+    counts = dict(
+        (
+            await db.execute(
+                select(Delivery.status, func.count())
+                .where(Delivery.destination_id == identifier)
+                .group_by(Delivery.status)
+            )
+        ).all()
+    )
+    failures = (
+        await db.execute(
+            select(Attempt, Delivery.event_id)
+            .join(Delivery, Delivery.id == Attempt.delivery_id)
+            .where(Delivery.destination_id == identifier, Attempt.failure_category.is_not(None))
+            .order_by(Attempt.started_at.desc())
+            .limit(10)
+        )
+    ).all()
+    terminal = counts.get("delivered", 0) + counts.get("dead_letter", 0)
+    return {
+        "counts": counts,
+        "success_rate": counts.get("delivered", 0) / terminal if terminal else None,
+        "recent_failures": [{**serialize(attempt), "event_id": event_id} for attempt, event_id in failures],
+    }
+
+
+@app.post("/api/destinations/{identifier}/test", status_code=201)
+async def test_destination(identifier: str, user=Depends(operator), db=Depends(session)):
+    destination = await required(db, Destination, identifier)
+    event_type = next((t for t in destination.event_types if t != "*"), "relayops.test")
+    event, _ = await ingest(
+        db,
+        destination.project_id,
+        event_type,
+        {"source": "destination-test"},
+        "destination-test-" + uid(),
+        destination_id=identifier,
+    )
+    audit(db, user, "destination.test", identifier, {"event_id": event.id})
+    await db.commit()
+    metrics.accepted.inc()
+    return await event_json(db, event, True)
+
+
 @app.post("/api/destinations", status_code=201)
 async def create_destination(body: DestinationIn, user=Depends(operator), db=Depends(session)):
     await required(db, Project, body.project_id)
@@ -244,6 +299,11 @@ async def patch_destination(
     identifier: str, body: DestinationPatch, user=Depends(operator), db=Depends(session)
 ):
     destination = await required(db, Destination, identifier)
+    if body.url is not None:
+        try:
+            validate_destination(body.url)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     for key, value in body.model_dump(exclude_none=True).items():
         setattr(destination, key, value)
     audit(db, user, "destination.update", identifier, body.model_dump(exclude_none=True))
@@ -355,7 +415,13 @@ async def redrive_delivery(identifier: str, user=Depends(operator), db=Depends(s
 
 @app.get("/api/overview")
 async def get_overview(user=Depends(identity), db=Depends(session)):
-    return await overview(db)
+    result = await overview(db)
+    result["active_incidents"] = await db.scalar(
+        select(func.count()).select_from(Incident).where(Incident.status != "resolved")
+    )
+    recent = (await db.scalars(select(Event).order_by(Event.created_at.desc()).limit(5))).all()
+    result["recent_events"] = [await event_json(db, event) for event in recent]
+    return result
 
 
 @app.get("/api/workers")
@@ -372,11 +438,38 @@ async def workers(user=Depends(identity), db=Depends(session)):
             )
             and not pool.paused
         )
+        fresh = [
+            w
+            for w in rows
+            if w.last_heartbeat > now() - timedelta(seconds=settings().failover_seconds)
+            and w.state == "running"
+        ]
+        since = now() - timedelta(minutes=30)
+        activity = await db.scalar(
+            select(func.count())
+            .select_from(Attempt)
+            .where(Attempt.region == pool.region, Attempt.started_at >= since)
+        )
+        failovers = await db.scalar(
+            select(func.count())
+            .select_from(Attempt)
+            .join(Delivery, Delivery.id == Attempt.delivery_id)
+            .where(Attempt.region == pool.region, Delivery.region != pool.region, Attempt.started_at >= since)
+        )
+        assigned = await db.scalar(
+            select(func.count())
+            .select_from(Delivery)
+            .where(Delivery.region == pool.region, Delivery.status.in_(["pending", "leased", "retry_wait"]))
+        )
         result.append(
             {
                 "region": pool.region,
                 "paused": pool.paused,
                 "healthy": healthy,
+                "active_worker_count": len(fresh) if not pool.paused else 0,
+                "assigned_queue_depth": assigned,
+                "attempts_last_30m": activity,
+                "failover_attempts_last_30m": failovers,
                 "workers": [serialize(w) for w in rows],
             }
         )

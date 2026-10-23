@@ -77,3 +77,19 @@ browser end-to-end success or benchmark capacity. Those remain separate gates.
   label container builds, Grafana queries or exported Jaeger traces as executed.
 - Reconcile docs and API contract with final behavior, regenerate real screenshots,
   rerun appropriate checks, inspect repository hygiene and deliver final report.
+
+## Destination and access milestone
+
+- Implemented destination URL/subscription editing, per-destination state counts,
+  recent failed attempts and a real test event restricted to the selected
+  enabled destination. Added a dedicated Destinations navigation page.
+- Added offline account creation with hidden password input, Argon2 hashing,
+  validated roles and audit records. Login address buckets now expire and have
+  a bounded count. Deployment documentation states the per-process limit scope.
+- Added overview p99, recent events and incident count; worker views include
+  observed activity, healthy worker count, assigned work and failover attempts.
+- All 44 backend tests passed on PostgreSQL, including destination scope/security,
+  operator/viewer action boundaries and login throttling. Ruff and mypy passed.
+  Frontend lint/type checks and 13 unit tests passed. Destination UI compiled in
+  a production build; the subsequent overview additions need the final build and
+  browser revalidation along with the other pending runtime gates.

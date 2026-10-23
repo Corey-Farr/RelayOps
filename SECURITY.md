@@ -21,6 +21,17 @@ Windows file mode flags do not replace NTFS access controls. Change credentials
 before sharing a running environment. Keep application logs and screenshots free
 of keys, session cookies and passwords.
 
+## Account administration
+
+Additional accounts can be created by an administrator with deployment database
+access using `docker compose exec api python -m relayops.users person@example.com
+--role operator` (one command). The password is entered through a hidden prompt,
+hashed before storage, and never passed as a command-line argument. Account
+creation is audited. Use `viewer` for read-only access. Login limiting is local
+to each API process (10 attempts per client address per minute); deploy a shared
+edge limiter before introducing multiple API replicas. Expired rate-limit entries
+are pruned and the number of active address buckets is capped.
+
 ## Webhook signing
 
 Destinations receive these headers:

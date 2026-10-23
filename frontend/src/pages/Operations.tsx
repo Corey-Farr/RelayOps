@@ -216,6 +216,42 @@ export function Overview() {
         ))}
       </div>
       <Workers compact />
+      <div className="three-grid">
+        <section className="panel mini">
+          <span>Events accepted</span>
+          <strong>{d.events_total}</strong>
+        </section>
+        <section className="panel mini">
+          <span>Active incidents</span>
+          <strong>{d.active_incidents ?? "—"}</strong>
+          <Link to="/incidents">Inspect incidents</Link>
+        </section>
+        <section className="panel mini">
+          <span>p99 delivery latency</span>
+          <strong>
+            {d.p99_latency_ms == null
+              ? "No samples"
+              : `${Math.round(d.p99_latency_ms)} ms`}
+          </strong>
+          <small>Acceptance to successful delivery</small>
+        </section>
+      </div>
+      <section className="panel">
+        <h2>Recent events</h2>
+        {d.recent_events?.length ? (
+          d.recent_events.map((e: any) => (
+            <div className="list-item" key={e.id}>
+              <Link to={`/events/${e.id}`}>
+                {e.type} · {e.id.slice(0, 12)}
+              </Link>
+              <Status value={e.status} />
+              <span>{stamp(e.created_at)}</span>
+            </div>
+          ))
+        ) : (
+          <Empty>No accepted events yet.</Empty>
+        )}
+      </section>
     </>
   );
 }
@@ -266,6 +302,14 @@ function Pool({ pool: p }: { pool: any }) {
       </div>
       <p>
         {p.workers.length} registered worker{p.workers.length === 1 ? "" : "s"}
+      </p>
+      <p>
+        {p.active_worker_count ?? "—"} active · {p.assigned_queue_depth ?? "—"}{" "}
+        assigned queued
+      </p>
+      <p>
+        {p.attempts_last_30m ?? "—"} attempts ·{" "}
+        {p.failover_attempts_last_30m ?? "—"} failover attempts (30m)
       </p>
       {p.workers.map((w: any) => (
         <div className="worker" key={w.id}>

@@ -9,7 +9,9 @@ from relayops.observability.telemetry import tracer
 from relayops.services.policy import ACTIVE, choose_policy, region_for
 
 
-async def ingest(db, project_id: str, event_type: str, payload: dict, key: str):
+async def ingest(
+    db, project_id: str, event_type: str, payload: dict, key: str, destination_id: str | None = None
+):
     if not key or len(key) > 200:
         raise HTTPException(422, "Idempotency-Key must contain 1..200 characters")
     canonical = json.dumps(
@@ -36,6 +38,10 @@ async def ingest(db, project_id: str, event_type: str, payload: dict, key: str):
         )
     ).all()
     destinations = [d for d in destinations if "*" in d.event_types or event_type in d.event_types]
+    if destination_id:
+        destinations = [d for d in destinations if d.id == destination_id]
+        if not destinations:
+            raise HTTPException(409, "Test destination must be enabled and subscribed to this event type")
     depth = await db.scalar(select(func.count()).select_from(Delivery).where(Delivery.status.in_(ACTIVE)))
     if depth + len(destinations) > settings().max_queue_depth:
         from relayops.observability.telemetry import backpressure

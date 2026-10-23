@@ -27,8 +27,15 @@ import {
   Incidents,
   IncidentDetail,
 } from "./pages/Operations";
-import { Lab, Policies, Settings, Login } from "./pages/Controls";
+import {
+  Lab,
+  Policies,
+  Settings,
+  Login,
+  DestinationPage,
+} from "./pages/Controls";
 const nav = [
+  ["/destinations", "Destinations", Box],
   ["/", "Overview", Gauge],
   ["/events", "Event explorer", Layers],
   ["/dead-letters", "Dead letters", Box],
@@ -173,6 +180,7 @@ export function App() {
               <Route path="/lab" element={<Lab />} />
               <Route path="/policies" element={<Policies />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/destinations" element={<DestinationPage />} />
               <Route
                 path="*"
                 element={
