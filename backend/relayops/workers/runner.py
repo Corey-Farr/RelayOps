@@ -14,7 +14,7 @@ from relayops.models import Delivery, Destination, Event, Policy, Pool, Worker, 
 from relayops.observability import telemetry as metrics
 from relayops.security.crypto import decrypt, signature, validate_destination
 from relayops.services.policy import ACTIVE
-from relayops.services.queue import claim, complete
+from relayops.services.queue import begin_dispatch, claim, complete
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ async def dispatch(job, client):
         span.set_attribute("relayops.delivery_id", job.id)
         span.set_attribute("relayops.region", region)
         trace_id = f"{span.get_span_context().trace_id:032x}"
+        if not await begin_dispatch(job, started, trace_id):
+            return
+        clock = time.monotonic()
         metrics.attempted.labels(region).inc()
         try:
             validate_destination(destination.url)

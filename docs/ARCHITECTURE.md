@@ -50,7 +50,10 @@ outstanding work rather than an unbounded process-local queue.
 Claim due work in a short transaction with row locking and `SKIP LOCKED`.
 Persist lease owner, expiration and a new lease version, then commit. The worker
 performs HTTP outside that transaction with bounded concurrency and timeouts.
-Completion checks the lease owner/version before updating delivery state.
+Before I/O, a fenced transaction appends a dispatch-start journal record. This
+records intent, not proof that bytes reached the receiver. An absent completion
+remains explicitly unknown in the event history after a crash; no duration or
+HTTP result is invented. Completion checks the lease owner/version before updating delivery state.
 An expired lease can be reclaimed; a stale completion cannot overwrite the new
 owner's state.
 

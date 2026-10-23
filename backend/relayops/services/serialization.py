@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from relayops.models import Attempt, Delivery, Destination
+from relayops.models import Attempt, Delivery, Destination, DispatchStart
 from relayops.services.policy import event_status
 
 
@@ -22,6 +22,15 @@ async def delivery_json(db, delivery, attempts=False):
             )
         ).all()
         result["attempts"] = [serialize(a) for a in rows]
+        starts = (
+            await db.scalars(
+                select(DispatchStart)
+                .where(DispatchStart.delivery_id == delivery.id)
+                .order_by(DispatchStart.started_at)
+            )
+        ).all()
+        observed = {a.number for a in rows}
+        result["dispatches"] = [{**serialize(s), "outcome_recorded": s.number in observed} for s in starts]
     return result
 
 

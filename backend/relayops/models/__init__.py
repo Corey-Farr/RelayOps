@@ -110,12 +110,28 @@ class Delivery(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     region: Mapped[str] = mapped_column(String(20))
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    cycle_attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     lease_version: Mapped[int] = mapped_column(Integer, default=0)
     lease_owner: Mapped[str | None] = mapped_column(String(100))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DispatchStart(Base):
+    """Immutable dispatch intent committed before network I/O; not proof of receipt."""
+
+    __tablename__ = "dispatch_starts"
+    __table_args__ = (UniqueConstraint("delivery_id", "lease_version"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    delivery_id: Mapped[str] = mapped_column(ForeignKey("deliveries.id"), index=True)
+    lease_version: Mapped[int] = mapped_column(Integer)
+    number: Mapped[int] = mapped_column(Integer)
+    worker_id: Mapped[str] = mapped_column(String(100))
+    region: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    trace_id: Mapped[str] = mapped_column(String(32))
 
 
 class Attempt(Base):

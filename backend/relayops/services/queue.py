@@ -2,7 +2,7 @@ from datetime import timedelta
 from sqlalchemy import and_, exists, or_, select
 from relayops.core.config import settings
 from relayops.core.db import Session
-from relayops.models import Attempt, Delivery, Event, Pool, Worker, now
+from relayops.models import Attempt, Delivery, DispatchStart, Event, Policy, Pool, Worker, now
 from relayops.observability import telemetry as metrics
 from relayops.services.policy import retry_delay, retryable
 
@@ -39,13 +39,59 @@ async def claim(worker_id: str, region: str, limit: int):
                     .with_for_update(skip_locked=True)
                 )
             ).all()
+            claimed = []
             for job in jobs:
+                policy = await db.get(Policy, job.policy_id)
+                if policy is None:
+                    raise RuntimeError("Delivery policy no longer exists")
+                if job.cycle_attempt_count >= policy.max_attempts:
+                    job.status = "dead_letter"
+                    job.lease_owner = None
+                    job.lease_until = None
+                    job.lease_version += 1
+                    continue
                 job.status = "leased"
                 job.lease_owner = worker_id
                 job.lease_version += 1
                 job.lease_until = timestamp + timedelta(seconds=cfg.lease_seconds)
                 job.attempt_count += 1
-            return jobs
+                job.cycle_attempt_count += 1
+                claimed.append(job)
+            return claimed
+
+
+async def begin_dispatch(job, started_at, trace_id: str):
+    """Fence before I/O and leave evidence if the process dies before completion."""
+    async with Session.begin() as db:
+        current = await db.scalar(select(Delivery).where(Delivery.id == job.id).with_for_update())
+        if (
+            current is None
+            or current.status != "leased"
+            or current.lease_owner != job.lease_owner
+            or current.lease_version != job.lease_version
+            or current.lease_until is None
+            or current.lease_until <= now()
+        ):
+            return False
+        existing = await db.scalar(
+            select(DispatchStart.id).where(
+                DispatchStart.delivery_id == job.id, DispatchStart.lease_version == job.lease_version
+            )
+        )
+        if existing:
+            return False
+        db.add(
+            DispatchStart(
+                delivery_id=job.id,
+                lease_version=job.lease_version,
+                number=job.attempt_count,
+                worker_id=job.lease_owner,
+                region=settings().worker_region,
+                started_at=started_at,
+                trace_id=trace_id,
+            )
+        )
+    return True
 
 
 async def complete(
@@ -94,7 +140,7 @@ async def complete(
             if event is None:
                 raise RuntimeError("Delivery event no longer exists")
             elapsed = (finished - event.created_at).total_seconds()
-        elif retryable(status) and current.attempt_count < policy.max_attempts:
+        elif retryable(status) and current.cycle_attempt_count < policy.max_attempts:
             with metrics.tracer.start_as_current_span("delivery.retry_schedule"):
                 current.status = "retry_wait"
                 current.next_attempt_at = finished + timedelta(
@@ -135,5 +181,6 @@ async def redrive(db, identifier: str):
     job.status = "pending"
     job.next_attempt_at = now()
     job.lease_version += 1
-    # Redrive grants one new attempt. Existing immutable attempt history is retained.
+    job.cycle_attempt_count = 0
+    # Start a bounded retry cycle without resetting historical attempt numbers.
     return job
