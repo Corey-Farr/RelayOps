@@ -1,0 +1,170 @@
+name: relayops
+
+x-backend: &backend
+  build: ./backend
+  env_file: .env
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 45s
+  logging: &logging
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+  environment: &backend-env
+    DATABASE_URL: postgresql+asyncpg://relayops:${POSTGRES_PASSWORD:?Run python scripts/demo.py init first}@postgres:5432/relayops
+    APP_ENV: demo
+    DEMO_SINK_URL: http://demo-sink:8081
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+
+x-worker: &worker
+  <<: *backend
+  command: ["python", "-m", "relayops.workers.runner"]
+  depends_on:
+    initialize: {condition: service_completed_successfully}
+    demo-sink: {condition: service_healthy}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/', timeout=2)"]
+    interval: 15s
+    timeout: 3s
+    retries: 5
+    start_period: 20s
+
+services:
+  postgres:
+    image: postgres:16.11-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: relayops
+      POSTGRES_DB: relayops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/demo.py init first}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relayops -d relayops"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *logging
+
+  initialize:
+    <<: *backend
+    restart: "no"
+    command: ["sh", "-c", "alembic upgrade head && python -m relayops.bootstrap"]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "relayops.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      initialize: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker-us-east:
+    <<: *worker
+    environment:
+      <<: *backend-env
+      WORKER_REGION: us-east
+      WORKER_ID: worker-us-east
+      WORKER_CONCURRENCY: "8"
+      WORKER_METRICS_PORT: "9000"
+
+  worker-eu-west:
+    <<: *worker
+    environment:
+      <<: *backend-env
+      WORKER_REGION: eu-west
+      WORKER_ID: worker-eu-west
+      WORKER_CONCURRENCY: "8"
+      WORKER_METRICS_PORT: "9000"
+
+  worker-ap-southeast:
+    <<: *worker
+    environment:
+      <<: *backend-env
+      WORKER_REGION: ap-southeast
+      WORKER_ID: worker-ap-southeast
+      WORKER_CONCURRENCY: "8"
+      WORKER_METRICS_PORT: "9000"
+
+  demo-sink:
+    build: ./demo-sink
+    restart: unless-stopped
+    init: true
+    environment:
+      DEMO_SIGNING_SECRET: ${DEMO_SIGNING_SECRET:?Run python scripts/demo.py init first}
+      DEMO_CONTROL_TOKEN: ${DEMO_CONTROL_TOKEN:?Run python scripts/demo.py init first}
+    volumes: [sink-data:/data]
+    # No published port: fault control is reachable only through the authenticated API.
+    logging: *logging
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:80"]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d"]
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:12.3.2
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Run python scripts/demo.py init first}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_VALUE: /badger/data
+      BADGER_DIRECTORY_KEY: /badger/key
+    ports: ["127.0.0.1:16686:16686"]
+    volumes: [jaeger-data:/badger]
+    logging: *logging
+
+volumes:
+  postgres-data:
+  sink-data:
+  prometheus-data:
+  grafana-data:
+  jaeger-data:

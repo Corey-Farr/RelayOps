@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+scrape_configs:
+  - job_name: relayops-api
+    static_configs:
+      - targets: [api:8000]
+  - job_name: relayops-workers
+    static_configs:
+      - targets: [worker-us-east:9000]
+        labels: {region: us-east}
+      - targets: [worker-eu-west:9000]
+        labels: {region: eu-west}
+      - targets: [worker-ap-southeast:9000]
+        labels: {region: ap-southeast}
