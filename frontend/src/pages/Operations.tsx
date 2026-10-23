@@ -289,8 +289,25 @@ export function Events() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(0);
+  const [filters, setFilters] = useState({
+    project_id: "",
+    destination_id: "",
+    event_type: "",
+    created_from: "",
+    created_to: "",
+    sort: "created_at",
+    direction: "desc",
+  });
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value)
+      params.set(
+        key,
+        key.startsWith("created_") ? new Date(value).toISOString() : value,
+      );
+  });
   const q = useData(
-    `/events?limit=100&search=${encodeURIComponent(search)}&status=${status}`,
+    `/events?limit=11&offset=${page * 10}&search=${encodeURIComponent(search)}&status=${status}&${params}`,
   );
   return (
     <>
@@ -326,11 +343,62 @@ export function Events() {
                 "pending",
                 "processing",
                 "delivered",
-                "partial",
+                "partial_failure",
                 "dead_letter",
+                "retry_wait",
+                "leased",
+                "no_destinations",
               ].map((s) => (
                 <option key={s}>{s}</option>
               ))}
+            </select>
+          </label>
+          {(
+            [
+              ["event_type", "Event type filter"],
+              ["project_id", "Project ID filter"],
+              ["destination_id", "Destination ID filter"],
+              ["created_from", "Accepted from"],
+              ["created_to", "Accepted until"],
+            ] as const
+          ).map(([key, label]) => (
+            <label key={key}>
+              {label}
+              <input
+                type={key.startsWith("created_") ? "datetime-local" : "text"}
+                value={filters[key]}
+                onChange={(e) => {
+                  setFilters({ ...filters, [key]: e.target.value });
+                  setPage(0);
+                }}
+              />
+            </label>
+          ))}
+          <label>
+            Sort by
+            <select
+              value={filters.sort}
+              onChange={(e) => {
+                setFilters({ ...filters, sort: e.target.value });
+                setPage(0);
+              }}
+            >
+              <option value="created_at">Accepted time</option>
+              <option value="type">Event type</option>
+              <option value="id">Event ID</option>
+            </select>
+          </label>
+          <label>
+            Sort direction
+            <select
+              value={filters.direction}
+              onChange={(e) => {
+                setFilters({ ...filters, direction: e.target.value });
+                setPage(0);
+              }}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
             </select>
           </label>
         </div>
@@ -355,7 +423,7 @@ export function Events() {
                   </tr>
                 </thead>
                 <tbody>
-                  {q.data.slice(page * 10, page * 10 + 10).map((e: any) => (
+                  {q.data.slice(0, 10).map((e: any) => (
                     <tr key={e.id}>
                       <td>
                         <Link className="mono" to={`/events/${e.id}`}>
@@ -381,10 +449,18 @@ export function Events() {
                 </tbody>
               </table>
             </div>
-            <Pager page={page} setPage={setPage} total={q.data.length} />
-            <p className="note">
-              Shows up to the 100 most recent matching events.
-            </p>
+            <div className="pagination" aria-label="Event pages">
+              <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+                Previous page
+              </button>
+              <span>Page {page + 1}</span>
+              <button
+                disabled={q.data.length <= 10}
+                onClick={() => setPage(page + 1)}
+              >
+                Next page
+              </button>
+            </div>
           </>
         )}
       </section>
@@ -443,14 +519,18 @@ function Delivery({ delivery: d }: { delivery: any }) {
         </ConfirmButton>
       )}
       {d.next_attempt_at && <p>Next attempt {stamp(d.next_attempt_at)}</p>}
-      {d.dispatches?.filter((s: any) => !s.outcome_recorded).map((s: any) => (
-        <div className="safety-note" key={s.id}>
-          <strong>Dispatch {s.number}: outcome unknown</strong>
-          <span>Dispatch intent persisted {stamp(s.started_at)} by {s.worker_id}.
-            No completion was recorded. The receiver may have accepted it;
-            a recovered attempt can duplicate delivery.</span>
-        </div>
-      ))}
+      {d.dispatches
+        ?.filter((s: any) => !s.outcome_recorded)
+        .map((s: any) => (
+          <div className="safety-note" key={s.id}>
+            <strong>Dispatch {s.number}: outcome unknown</strong>
+            <span>
+              Dispatch intent persisted {stamp(s.started_at)} by {s.worker_id}.
+              No completion was recorded. The receiver may have accepted it; a
+              recovered attempt can duplicate delivery.
+            </span>
+          </div>
+        ))}
       {d.attempts.length ? (
         <ol className="timeline">
           {d.attempts.map((a: any) => (

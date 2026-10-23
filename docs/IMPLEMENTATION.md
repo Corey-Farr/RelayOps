@@ -48,3 +48,32 @@ browser end-to-end success or benchmark capacity. Those remain separate gates.
 - Monitoring/Compose configuration validation
 - Measured benchmark and incident evidence
 - Security and documentation reconciliation
+
+## Subsequent hardening evidence
+
+- Added a durable dispatch-intent journal and pre-I/O fencing; unknown outcomes
+  remain visible after crashes. Repeated expired claims are bounded by policy,
+  and redrive grants a fresh retry cycle without rewriting historical attempts.
+- All 40 backend tests passed after this change; Ruff and mypy passed.
+- Frozen migration DDL replaces the original migration's mutable model import.
+  Fresh migration upgrade, full downgrade and re-upgrade passed on a separate
+  native PostgreSQL database. The existing native demo also upgraded successfully.
+- The restarted native stack passed signed-delivery / 503-retry-recovery smoke.
+- Event filters now execute before database pagination. A further PostgreSQL
+  test passed for status, offset, date, project, destination and sorting behavior.
+- A real Playwright delivery/outage/recovery flow passed previously. It must be
+  rerun after the latest API/UI changes before final screenshot publication.
+
+## Remaining scope audit (not completion claims)
+
+- Review every master requirement against implementation, particularly the full
+  destination editor/health/test-event flow, role-aware UI, user administration,
+  overview summaries, pool activity/failover evidence and policy comparisons.
+- Exercise sustained threshold-crossing incidents and acknowledgement/resolution,
+  timeout/rate-limit/latency scenarios and bounded graceful shutdown.
+- Review login-rate-limit storage, production destination/DNS boundary, validation,
+  tracing context propagation, telemetry freshness and secret handling.
+- Validate all launch/CI/monitoring configurations possible without Docker; do not
+  label container builds, Grafana queries or exported Jaeger traces as executed.
+- Reconcile docs and API contract with final behavior, regenerate real screenshots,
+  rerun appropriate checks, inspect repository hygiene and deliver final report.

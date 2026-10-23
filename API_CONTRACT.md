@@ -1,6 +1,14 @@
 # RelayOps API contract
 Base `/api`. JSON; collection responses are arrays, timestamps ISO UTC, identifiers UUID strings. Errors `{detail: string}`. Cookie `relayops_session` HttpOnly; login response `{user:{id,email,role},csrf_token:string}`. GET `/auth/me` same shape. All cookie-authenticated mutations require `X-CSRF-Token`. Roles admin/operator/viewer; viewer read-only, admin manages keys/users/projects.
 
+Event collection supports `offset`, `limit` (1..500), `event_type`, `destination_id`,
+`created_from`/`created_to` (timezone-aware ISO timestamps), `sort` (`created_at`,
+`type`, `id`) and `direction` (`asc`, `desc`). All filters apply before pagination.
+Delivery detail includes immutable `dispatches` with number, worker, region,
+start timestamp, trace ID and `outcome_recorded`. A dispatch intent without a
+completion is an unknown outcome, not an observed failure. Redrive resets the
+bounded retry-cycle counter while retaining historical attempt numbers.
+
 - POST `/auth/login` `{email,password}`; POST `/auth/logout`; GET `/auth/me`.
 - GET `/projects` -> `[{id,name,created_at}]`; POST `/projects` `{name}`.
 - GET `/projects/{id}/keys` -> `[{id,name,prefix,created_at,revoked_at}]`; POST same `{name}` -> `{id,key}` (only reveal); DELETE `/keys/{id}`.

@@ -1,14 +1,15 @@
 import asyncio
 from collections import defaultdict, deque
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Literal
 import time
 import httpx
 from argon2.exceptions import VerificationError
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import func, select, text
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import IntegrityError
 from relayops.core.config import settings
 from relayops.core.db import session
@@ -272,21 +273,57 @@ async def events(
     project_id: str | None = None,
     status: str | None = None,
     search: str | None = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    event_type: str | None = None,
+    destination_id: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    sort: Literal["created_at", "type", "id"] = "created_at",
+    direction: Literal["asc", "desc"] = "desc",
     user=Depends(identity),
     db=Depends(session),
 ):
-    query = select(Event).order_by(Event.created_at.desc())
+    column = getattr(Event, sort)
+    query = select(Event).order_by(column.asc() if direction == "asc" else column.desc(), Event.id)
     if project_id:
         query = query.where(Event.project_id == project_id)
     if search:
         query = query.where(
             Event.type.ilike("%" + search[:120] + "%") | Event.id.ilike("%" + search[:120] + "%")
         )
-    results = [
-        await event_json(db, e) for e in (await db.scalars(query.limit(min(max(limit, 1), 500)))).all()
-    ]
-    return [r for r in results if not status or r["status"] == status]
+    if event_type:
+        query = query.where(Event.type == event_type)
+    for value in (created_from, created_to):
+        if value and value.tzinfo is None:
+            raise HTTPException(422, "Date filters require a timezone offset")
+    if created_from and created_to and created_from > created_to:
+        raise HTTPException(422, "Start date must precede end date")
+    if created_from:
+        query = query.where(Event.created_at >= created_from)
+    if created_to:
+        query = query.where(Event.created_at <= created_to)
+    related = select(Delivery.id).where(Delivery.event_id == Event.id)
+    if destination_id:
+        query = query.where(exists(related.where(Delivery.destination_id == destination_id)))
+    if status:
+        any_job = exists(related)
+        active = exists(related.where(Delivery.status.in_(["pending", "leased", "retry_wait"])))
+        filters = {
+            "no_destinations": ~any_job,
+            "processing": active,
+            "delivered": any_job & ~exists(related.where(Delivery.status != "delivered")),
+            "dead_letter": any_job & ~exists(related.where(Delivery.status != "dead_letter")),
+            "partial_failure": ~active
+            & exists(related.where(Delivery.status == "delivered"))
+            & exists(related.where(Delivery.status == "dead_letter")),
+        }
+        if status in {"pending", "leased", "retry_wait"}:
+            filters[status] = exists(related.where(Delivery.status == status))
+        if status not in filters:
+            raise HTTPException(422, "Unknown event/delivery status")
+        query = query.where(filters[status])
+    return [await event_json(db, e) for e in (await db.scalars(query.offset(offset).limit(limit))).all()]
 
 
 @app.get("/api/events/{identifier}")
