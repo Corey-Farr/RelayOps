@@ -16,3 +16,4 @@ test-results/
 playwright-report/
 *.log
 .DS_Store
+benchmarks/results/

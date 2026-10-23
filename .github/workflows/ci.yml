@@ -1,0 +1,94 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16.11-alpine
+        env:
+          POSTGRES_USER: relayops
+          POSTGRES_PASSWORD: ci-only-isolated-test
+          POSTGRES_DB: relayops_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U relayops -d relayops_test"
+          --health-interval 5s --health-timeout 3s --health-retries 15
+    env:
+      DATABASE_URL: postgresql+asyncpg://relayops:ci-only-isolated-test@localhost:5432/relayops_test
+      APP_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13', cache: pip, cache-dependency-path: backend/requirements.lock}
+      - run: python -m pip install -r requirements.lock
+      - run: python -m pip install --no-deps -e .
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m mypy relayops
+      - run: python -m pytest -v
+      - run: python -m unittest discover -s ../demo-sink -v
+      - run: python -m compileall -q ../scripts ../benchmarks ../demo-sink
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: python scripts/demo.py demo
+      - run: python scripts/smoke.py --monitoring
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Browser end-to-end checks against the real stack
+        shell: bash
+        run: |
+          set -a
+          source .env
+          set +a
+          cd frontend
+          npm run test:e2e
+      - name: Capture service diagnostics
+        if: failure()
+        run: docker compose ps && docker compose logs --tail=150
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-artifacts
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+      - name: Stop and remove isolated CI data
+        if: always()
+        run: docker compose down --volumes

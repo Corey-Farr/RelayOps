@@ -1,4 +1,5 @@
 """Local-only receiver: real HMAC verification and persistent, bounded fault injection."""
+
 import hashlib
 import hmac
 import json
@@ -21,7 +22,9 @@ def verify(body: bytes, timestamp: str, signature: str, secret: str, now=None) -
             return False
     except (TypeError, ValueError):
         return False
-    expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+    ).hexdigest()
     return hmac.compare_digest(signature.removeprefix("sha256="), expected)
 
 
@@ -43,8 +46,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         # Do not log bodies, headers, tokens or query strings.
-        print(json.dumps({"service": "demo-sink", "method": self.command,
-                          "path": self.path.split("?")[0], "message": fmt % args}), flush=True)
+        print(
+            json.dumps(
+                {
+                    "service": "demo-sink",
+                    "method": self.command,
+                    "path": self.path.split("?")[0],
+                    "status": str(args[1]) if len(args) > 1 else "unknown",
+                }
+            ),
+            flush=True,
+        )
 
     def respond(self, status, body, headers=None):
         payload = json.dumps(body).encode()
@@ -60,7 +72,9 @@ class Handler(BaseHTTPRequestHandler):
             pass  # Expected when timeout mode outlives the dispatcher's deadline.
 
     def authenticated(self):
-        return hmac.compare_digest(self.headers.get("X-Control-Token", ""), CONTROL_TOKEN)
+        return hmac.compare_digest(
+            self.headers.get("X-Control-Token", ""), CONTROL_TOKEN
+        )
 
     def body(self):
         try:
@@ -106,8 +120,12 @@ class Handler(BaseHTTPRequestHandler):
             body = self.body()
         except ValueError as exc:
             return self.respond(413, {"detail": str(exc)})
-        if not verify(body, self.headers.get("X-RelayOps-Timestamp", ""),
-                      self.headers.get("X-RelayOps-Signature", ""), SECRET):
+        if not verify(
+            body,
+            self.headers.get("X-RelayOps-Timestamp", ""),
+            self.headers.get("X-RelayOps-Signature", ""),
+            SECRET,
+        ):
             return self.respond(401, {"detail": "signature verification failed"})
         with LOCK:
             state = read_state()
@@ -119,20 +137,44 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "intermittent" and state["requests"] % 2 == 1:
             return self.respond(500, {"detail": "simulated intermittent failure"})
         if mode == "rate_limit":
-            return self.respond(429, {"detail": "simulated rate limit"}, {"Retry-After": "2"})
+            return self.respond(
+                429, {"detail": "simulated rate limit"}, {"Retry-After": "2"}
+            )
         if mode == "latency":
             time.sleep(2)
         elif mode == "timeout":
             time.sleep(35)
-        self.respond(200, {"accepted": True, "event_id": self.headers.get("X-RelayOps-Event-ID")})
+        self.respond(
+            200, {"accepted": True, "event_id": self.headers.get("X-RelayOps-Event-ID")}
+        )
 
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
+    slots = threading.BoundedSemaphore(64)
+
+    def process_request(self, request, client_address):
+        request.settimeout(10)
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
 
 
 if __name__ == "__main__":
     if len(SECRET) < 32 or len(CONTROL_TOKEN) < 32:
-        raise SystemExit("DEMO_SIGNING_SECRET and DEMO_CONTROL_TOKEN must each contain at least 32 characters")
-    Server(("0.0.0.0", 8081), Handler).serve_forever()
+        raise SystemExit(
+            "DEMO_SIGNING_SECRET and DEMO_CONTROL_TOKEN must each contain at least 32 characters"
+        )
+    Server((os.getenv("SINK_HOST", "127.0.0.1"), 8081), Handler).serve_forever()

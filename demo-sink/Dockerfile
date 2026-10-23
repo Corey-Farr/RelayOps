@@ -1,5 +1,6 @@
 FROM python:3.13.9-slim
 WORKDIR /app
+ENV SINK_HOST=0.0.0.0
 RUN useradd --uid 10001 --create-home sink && mkdir /data && chown sink:sink /data
 COPY server.py .
 USER sink
