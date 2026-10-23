@@ -3,7 +3,7 @@ from math import ceil
 from sqlalchemy import func, select, text
 from relayops.core.config import settings
 from relayops.core.db import Session
-from relayops.models import Attempt, Delivery, Event, Incident, Pool, Worker, now
+from relayops.models import Delivery, Event, Incident, Pool, Worker, now
 from relayops.services.policy import ACTIVE
 
 
@@ -49,15 +49,16 @@ async def overview(db):
     depth = sum(counts.get(s, 0) for s in ACTIVE)
     completed = counts.get("delivered", 0)
     dead = counts.get("dead_letter", 0)
+    elapsed_ms = func.extract("epoch", Delivery.delivered_at - Event.created_at) * 1000
     latency = await db.scalar(
-        select(func.percentile_cont(0.95).within_group(Attempt.duration_ms)).where(
-            Attempt.http_status.between(200, 299)
-        )
+        select(func.percentile_cont(0.95).within_group(elapsed_ms))
+        .join(Event, Event.id == Delivery.event_id)
+        .where(Delivery.status == "delivered")
     )
     p99 = await db.scalar(
-        select(func.percentile_cont(0.99).within_group(Attempt.duration_ms)).where(
-            Attempt.http_status.between(200, 299)
-        )
+        select(func.percentile_cont(0.99).within_group(elapsed_ms))
+        .join(Event, Event.id == Delivery.event_id)
+        .where(Delivery.status == "delivered")
     )
     recent = await db.scalar(
         select(func.count())

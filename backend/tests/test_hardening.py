@@ -39,3 +39,24 @@ async def test_dispatch_does_not_download_response_body(database):
     transport = httpx.MockTransport(lambda _: httpx.Response(200, stream=BodyMustNotBeRead()))
     async with httpx.AsyncClient(transport=transport) as client:
         await dispatch(job, client)
+
+
+@pytest.mark.integration
+async def test_overview_latency_includes_queue_wait(database):
+    from datetime import timedelta
+    from sqlalchemy import select
+    from relayops.core.db import Session
+    from relayops.models import Delivery, now
+    from relayops.services.ingestion import ingest
+    from relayops.services.monitoring import overview
+
+    async with Session.begin() as db:
+        event, _ = await ingest(db, database["project_id"], "latency.test", {}, "latency")
+        delivery = await db.scalar(select(Delivery).where(Delivery.event_id == event.id))
+        event.created_at = now() - timedelta(seconds=10)
+        delivery.status = "delivered"
+        delivery.delivered_at = event.created_at + timedelta(seconds=10)
+    async with Session() as db:
+        result = await overview(db)
+        assert result["p95_latency_ms"] == pytest.approx(10000)
+        assert result["p99_latency_ms"] == pytest.approx(10000)
