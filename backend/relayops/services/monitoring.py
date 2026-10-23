@@ -1,4 +1,5 @@
 from datetime import timedelta
+from math import ceil
 from sqlalchemy import func, select, text
 from relayops.core.config import settings
 from relayops.core.db import Session
@@ -126,7 +127,7 @@ async def detect_incidents():
             and objective["short_burn_rate"] >= 2
         ):
             conditions.append(("slo_burn", "Delivery error budget burning", "critical", "slo", objective))
-        if evidence["queue_depth"] >= int(cfg.max_queue_depth * 0.8):
+        if evidence["queue_depth"] >= ceil(cfg.max_queue_depth * 0.8):
             conditions.append(
                 (
                     "queue_capacity",

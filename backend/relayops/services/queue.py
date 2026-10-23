@@ -78,6 +78,8 @@ async def complete(
             )
         )
         current = await db.scalar(select(Delivery).where(Delivery.id == job.id).with_for_update())
+        if current is None:
+            raise RuntimeError("Claimed delivery no longer exists")
         if (
             current.lease_version != job.lease_version
             or current.lease_owner != job.lease_owner
@@ -88,9 +90,10 @@ async def complete(
         if status is not None and 200 <= status < 300:
             current.status = "delivered"
             current.delivered_at = finished
-            metrics.succeeded.labels(region).inc()
             event = await db.get(Event, job.event_id)
-            metrics.e2e_duration.labels(region).observe((finished - event.created_at).total_seconds())
+            if event is None:
+                raise RuntimeError("Delivery event no longer exists")
+            elapsed = (finished - event.created_at).total_seconds()
         elif retryable(status) and current.attempt_count < policy.max_attempts:
             with metrics.tracer.start_as_current_span("delivery.retry_schedule"):
                 current.status = "retry_wait"
@@ -99,12 +102,18 @@ async def complete(
                         current.attempt_count, policy.backoff_base, policy.backoff_cap, retry_after
                     )
                 )
-                metrics.retries.labels(region).inc()
         else:
             current.status = "dead_letter"
-            metrics.dead.labels(region).inc()
         current.lease_owner = None
         current.lease_until = None
+        outcome = current.status
+    if outcome == "delivered":
+        metrics.succeeded.labels(region).inc()
+        metrics.e2e_duration.labels(region).observe(elapsed)
+    elif outcome == "retry_wait":
+        metrics.retries.labels(region).inc()
+    else:
+        metrics.dead.labels(region).inc()
     return True
 
 

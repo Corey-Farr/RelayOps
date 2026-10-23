@@ -24,6 +24,8 @@ async def dispatch(job, client):
         destination = await db.get(Destination, job.destination_id)
         event = await db.get(Event, job.event_id)
         policy = await db.get(Policy, job.policy_id)
+    if destination is None or event is None or policy is None:
+        raise RuntimeError("Claimed delivery references missing data")
     body = json.dumps(
         {
             "id": event.id,
@@ -58,11 +60,11 @@ async def dispatch(job, client):
         metrics.attempted.labels(region).inc()
         try:
             validate_destination(destination.url)
-            response = await client.post(
-                destination.url, content=body, headers=headers, timeout=policy.timeout_seconds
-            )
-            status = response.status_code
-            retry_after = response.headers.get("retry-after")
+            async with client.stream(
+                "POST", destination.url, content=body, headers=headers, timeout=policy.timeout_seconds
+            ) as response:
+                status = response.status_code
+                retry_after = response.headers.get("retry-after")
             if not 200 <= status < 300:
                 category = "http_error"
         except httpx.TimeoutException:
@@ -101,8 +103,8 @@ async def heartbeat(worker_id, state="running"):
         active = await db.scalar(
             select(func.count()).select_from(Delivery).where(Delivery.status == "leased")
         )
-        metrics.queue.set(depth)
-        metrics.inflight.set(active)
+        metrics.queue.set(depth or 0)
+        metrics.inflight.set(active or 0)
         metrics.heartbeat.labels(cfg.worker_region).set(time.time())
 
 
@@ -116,7 +118,7 @@ async def run(stop=None):
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:
             signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
-    tasks = set()
+    tasks: set[asyncio.Task] = set()
     last_heartbeat = 0.0
     async with httpx.AsyncClient(
         follow_redirects=False,
@@ -156,7 +158,10 @@ async def run(stop=None):
             _, pending = await asyncio.wait(tasks, timeout=35)
             for task in pending:
                 task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    log.error("Delivery failed during shutdown; lease will recover", exc_info=result)
         await heartbeat(worker_id, "stopped")
     await engine.dispose()
 
