@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     slo_target: float = Field(default=0.99, gt=0, lt=1)
     slo_deadline_seconds: int = Field(default=30, ge=1, le=3600)
     slo_min_samples: int = Field(default=20, ge=1)
+    incident_burn_threshold: float = Field(default=2.0, gt=0)
+    incident_queue_fraction: float = Field(default=0.8, gt=0, le=1)
     incident_dead_letter_threshold: int = Field(default=10, ge=1)
     otel_exporter_otlp_endpoint: str = ""
 

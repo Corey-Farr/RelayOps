@@ -3,7 +3,7 @@ from math import ceil
 from sqlalchemy import func, select, text
 from relayops.core.config import settings
 from relayops.core.db import Session
-from relayops.models import Delivery, Event, Incident, Pool, Worker, now
+from relayops.models import Delivery, Event, Incident, Policy, Pool, Worker, now
 from relayops.services.policy import ACTIVE
 
 
@@ -141,11 +141,11 @@ async def detect_incidents():
         if (
             objective["sufficient_data"]
             and objective["short_sufficient_data"]
-            and objective["burn_rate"] >= 2
-            and objective["short_burn_rate"] >= 2
+            and objective["burn_rate"] >= cfg.incident_burn_threshold
+            and objective["short_burn_rate"] >= cfg.incident_burn_threshold
         ):
             conditions.append(("slo_burn", "Delivery error budget burning", "critical", "slo", objective))
-        if evidence["queue_depth"] >= ceil(cfg.max_queue_depth * 0.8):
+        if evidence["queue_depth"] >= ceil(cfg.max_queue_depth * cfg.incident_queue_fraction):
             conditions.append(
                 (
                     "queue_capacity",
@@ -209,3 +209,58 @@ async def detect_incidents():
                 # Keep the latest evidence current without flooding the timeline.
                 incident.evidence = details
                 incident.updated_at = stamp
+
+
+async def policy_comparison(db):
+    """Compare terminal outcomes and successful E2E latency, with explicit sample sizes."""
+    elapsed_ms = func.extract("epoch", Delivery.delivered_at - Event.created_at) * 1000
+    counts = (
+        select(
+            Delivery.policy_id.label("policy_id"),
+            func.count().label("total"),
+            func.count().filter(Delivery.status == "delivered").label("delivered"),
+            func.count().filter(Delivery.status == "dead_letter").label("dead_letter"),
+        )
+        .group_by(Delivery.policy_id)
+        .subquery()
+    )
+    latencies = (
+        select(
+            Delivery.policy_id.label("policy_id"),
+            func.percentile_cont(0.95).within_group(elapsed_ms).label("p95_latency_ms"),
+            func.count().label("latency_samples"),
+        )
+        .join(Event, Event.id == Delivery.event_id)
+        .where(Delivery.status == "delivered", Delivery.delivered_at.is_not(None))
+        .group_by(Delivery.policy_id)
+        .subquery()
+    )
+    rows = (
+        (
+            await db.execute(
+                select(
+                    Policy.id.label("policy_id"),
+                    func.coalesce(counts.c.total, 0).label("total"),
+                    func.coalesce(counts.c.delivered, 0).label("delivered"),
+                    func.coalesce(counts.c.dead_letter, 0).label("dead_letter"),
+                    latencies.c.p95_latency_ms,
+                    func.coalesce(latencies.c.latency_samples, 0).label("latency_samples"),
+                )
+                .outerjoin(counts, Policy.id == counts.c.policy_id)
+                .outerjoin(latencies, Policy.id == latencies.c.policy_id)
+                .order_by(Policy.version.desc())
+            )
+        )
+        .mappings()
+        .all()
+    )
+    result = []
+    for row in rows:
+        item = dict(row)
+        terminal = item["delivered"] + item["dead_letter"]
+        item["terminal_samples"] = terminal
+        item["success_rate"] = fraction(item["delivered"], terminal)
+        item["sufficient_data"] = terminal >= settings().slo_min_samples
+        item["latency_sufficient_data"] = item["latency_samples"] >= settings().slo_min_samples
+        result.append(item)
+    return result

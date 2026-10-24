@@ -590,36 +590,9 @@ async def generate(body: GenerateIn, user=Depends(operator), db=Depends(session)
 @app.get("/api/policies")
 async def policies(user=Depends(identity), db=Depends(session)):
     control = await required(db, Control, 1)
-    rows = (await db.scalars(select(Policy).order_by(Policy.version.desc()))).all()
-    comparison = []
-    for policy in rows:
-        counts = dict(
-            (
-                await db.execute(
-                    select(Delivery.status, func.count())
-                    .where(Delivery.policy_id == policy.id)
-                    .group_by(Delivery.status)
-                )
-            ).all()
-        )
-        total = sum(counts.values())
-        delivered = counts.get("delivered", 0)
-        terminal = delivered + counts.get("dead_letter", 0)
-        p95 = await db.scalar(
-            select(func.percentile_cont(0.95).within_group(Attempt.duration_ms))
-            .join(Delivery, Delivery.id == Attempt.delivery_id)
-            .where(Delivery.policy_id == policy.id, Attempt.http_status.between(200, 299))
-        )
-        comparison.append(
-            {
-                "policy_id": policy.id,
-                "total": total,
-                "delivered": delivered,
-                "dead_letter": counts.get("dead_letter", 0),
-                "success_rate": delivered / terminal if terminal else None,
-                "p95_latency_ms": p95,
-            }
-        )
+    from relayops.services.monitoring import policy_comparison
+
+    comparison = await policy_comparison(db)
     history = (
         await db.scalars(
             select(Audit).where(Audit.action.like("policy.%")).order_by(Audit.created_at.desc()).limit(50)

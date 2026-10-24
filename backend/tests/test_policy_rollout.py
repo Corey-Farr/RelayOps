@@ -2,6 +2,7 @@
 
 import httpx
 import pytest
+from sqlalchemy import select
 
 from relayops.core.db import Session
 from relayops.models import Delivery
@@ -54,3 +55,60 @@ async def test_candidate_pin_survives_rollback_and_retry(database):
         assert policies["candidate"] is None
         assert any(row["policy_id"] == candidate_id and row["total"] == 1 for row in policies["comparison"])
         assert [row["action"] for row in policies["history"]] == ["policy.rollback", "policy.candidate"]
+
+
+async def test_policy_comparison_uses_delivery_latency_and_reports_sample_counts(database):
+    from datetime import timedelta
+    from relayops.models import Attempt, now
+    from relayops.services.monitoring import policy_comparison
+
+    async with Session.begin() as db:
+        event, _ = await ingest(db, database["project_id"], "comparison.test", {}, "comparison")
+        event.created_at = now() - timedelta(seconds=100)
+        delivery = await db.scalar(select(Delivery).where(Delivery.event_id == event.id))
+        delivery.status = "delivered"
+        delivery.delivered_at = event.created_at + timedelta(seconds=20)
+        db.add(
+            Attempt(
+                delivery_id=delivery.id,
+                number=1,
+                worker_id="old",
+                region="us-east",
+                started_at=now(),
+                ended_at=now(),
+                duration_ms=1,
+                http_status=200,
+            )
+        )
+    async with Session() as db:
+        result = (await policy_comparison(db))[0]
+    assert result["p95_latency_ms"] == pytest.approx(20000)
+    assert result["terminal_samples"] == 1
+    assert result["latency_samples"] == 1
+    assert result["success_rate"] == 1
+    assert result["sufficient_data"] is False
+
+
+async def test_redrive_backoff_restarts_at_first_cycle_attempt(database, monkeypatch):
+    from relayops.models import now
+    from relayops.services.queue import redrive
+    from relayops.services import queue
+
+    async with Session.begin() as db:
+        await ingest(db, database["project_id"], "redrive.test", {}, "redrive")
+        delivery = await db.scalar(select(Delivery))
+        delivery.status = "dead_letter"
+        delivery.attempt_count = 12
+        delivery.cycle_attempt_count = 3
+        await redrive(db, delivery.id)
+    captured = []
+
+    def delay(attempt, *_):
+        captured.append(attempt)
+        return 1
+
+    monkeypatch.setattr(queue, "retry_delay", delay)
+    job = (await claim("redrive-test", "us-east", 1))[0]
+    assert job.attempt_count == 13
+    await complete(job, 503, "http_error", 1, now(), None, database["policy"], "")
+    assert captured == [1]

@@ -11,6 +11,11 @@ os.environ.setdefault("DEMO_SINK_URL", "http://127.0.0.1:8081")
 async def database():
     if not os.getenv("DATABASE_URL"):
         pytest.skip("Set DATABASE_URL to a dedicated PostgreSQL test database")
+    from sqlalchemy.engine import make_url
+
+    database_name = make_url(os.environ["DATABASE_URL"]).database or ""
+    if not database_name.endswith("_test"):
+        pytest.fail("Refusing destructive fixtures: DATABASE_URL database name must end with _test")
     from relayops.core.db import engine, Session
     from relayops.models import Base, Control, Policy, Pool, Project, Destination, User
     from relayops.security.crypto import encrypt, passwords

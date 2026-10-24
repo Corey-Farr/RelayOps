@@ -145,7 +145,7 @@ async def complete(
                 current.status = "retry_wait"
                 current.next_attempt_at = finished + timedelta(
                     seconds=retry_delay(
-                        current.attempt_count, policy.backoff_base, policy.backoff_cap, retry_after
+                        current.cycle_attempt_count, policy.backoff_base, policy.backoff_cap, retry_after
                     )
                 )
         else:
