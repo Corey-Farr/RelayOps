@@ -20,12 +20,11 @@ jobs:
           assert tomllib.load(open('backend/pyproject.toml', 'rb'))['project']['version'] == version
           assert json.load(open('frontend/package.json'))['version'] == version
           PY
-      - run: python scripts/demo.py demo
-      - run: python scripts/smoke.py --monitoring
-      - if: always()
-        run: docker compose down --volumes
-  publish:
+  checks:
     needs: validate
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: [validate, checks]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

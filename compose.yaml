@@ -22,7 +22,11 @@ x-worker: &worker
     initialize: {condition: service_completed_successfully}
     demo-sink: {condition: service_healthy}
   healthcheck:
-    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/', timeout=2)"]
+    test:
+      - CMD
+      - python
+      - -c
+      - "import re,time,urllib.request; body=urllib.request.urlopen('http://127.0.0.1:9000/',timeout=2).read().decode(); values=re.findall(r'^relayops_worker_heartbeat_timestamp\\{[^}]+\\} ([0-9.e+]+)',body,re.M); assert values and time.time()-max(map(float,values)) < 30"
     interval: 15s
     timeout: 3s
     retries: 5

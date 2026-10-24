@@ -22,9 +22,7 @@ def verify(body: bytes, timestamp: str, signature: str, secret: str, now=None) -
             return False
     except (TypeError, ValueError):
         return False
-    expected = hmac.new(
-        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature.removeprefix("sha256="), expected)
 
 
@@ -72,9 +70,7 @@ class Handler(BaseHTTPRequestHandler):
             pass  # Expected when timeout mode outlives the dispatcher's deadline.
 
     def authenticated(self):
-        return hmac.compare_digest(
-            self.headers.get("X-Control-Token", ""), CONTROL_TOKEN
-        )
+        return hmac.compare_digest(self.headers.get("X-Control-Token", ""), CONTROL_TOKEN)
 
     def body(self):
         try:
@@ -137,16 +133,12 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "intermittent" and state["requests"] % 2 == 1:
             return self.respond(500, {"detail": "simulated intermittent failure"})
         if mode == "rate_limit":
-            return self.respond(
-                429, {"detail": "simulated rate limit"}, {"Retry-After": "2"}
-            )
+            return self.respond(429, {"detail": "simulated rate limit"}, {"Retry-After": "2"})
         if mode == "latency":
             time.sleep(2)
         elif mode == "timeout":
             time.sleep(35)
-        self.respond(
-            200, {"accepted": True, "event_id": self.headers.get("X-RelayOps-Event-ID")}
-        )
+        self.respond(200, {"accepted": True, "event_id": self.headers.get("X-RelayOps-Event-ID")})
 
 
 class Server(ThreadingHTTPServer):

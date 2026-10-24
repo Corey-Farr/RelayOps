@@ -58,17 +58,13 @@ def initialize():
     with os.fdopen(descriptor, "w") as handle:
         handle.write("# Generated local secrets. Do not commit or share.\n")
         handle.writelines(f"{key}={value}\n" for key, value in values.items())
-    print(
-        "Generated private .env. Administrator email/password: ADMIN_EMAIL / ADMIN_PASSWORD in that file."
-    )
+    print("Generated private .env. Administrator email/password: ADMIN_EMAIL / ADMIN_PASSWORD in that file.")
     print("Grafana username: admin; password: GRAFANA_PASSWORD in .env.")
 
 
 def compose(*args):
     if not shutil.which("docker"):
-        raise SystemExit(
-            "Docker is unavailable. Install Docker with Compose v2, then rerun this command."
-        )
+        raise SystemExit("Docker is unavailable. Install Docker with Compose v2, then rerun this command.")
     subprocess.run(["docker", "compose", *args], cwd=ROOT, check=True)
 
 
@@ -91,9 +87,7 @@ def main():
         compose("down")
     elif args.command == "clean":
         compose("down", "--volumes", "--remove-orphans")
-        print(
-            "Removed demo database and monitoring volumes. .env retained to preserve credentials."
-        )
+        print("Removed demo database and monitoring volumes. .env retained to preserve credentials.")
 
 
 if __name__ == "__main__":

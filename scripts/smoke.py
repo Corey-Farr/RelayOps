@@ -55,9 +55,7 @@ def poll(description, callback, timeout=90):
         except (urllib.error.URLError, TimeoutError) as exc:
             last = str(exc)
         time.sleep(0.5)
-    raise AssertionError(
-        f"Timed out waiting for {description}. Last network error: {last}"
-    )
+    raise AssertionError(f"Timed out waiting for {description}. Last network error: {last}")
 
 
 def run(base, monitoring=False):
@@ -73,15 +71,11 @@ def run(base, monitoring=False):
     assert len(pools["pools"]) == 3
     projects = client.request("/api/projects")
     assert projects, "Bootstrap did not create the demo project"
-    project = projects[0]
+    project = next((item for item in projects if item["name"] == "Demo project"), None)
+    assert project, "Bootstrap did not create the named Demo project"
     destinations = client.request(f"/api/destinations?project_id={project['id']}")
-    sink_url = os.getenv(
-        "DEMO_SINK_URL", read_env().get("DEMO_SINK_URL", "http://demo-sink:8081")
-    )
-    assert any(
-        d["enabled"] and d["url"] == sink_url.rstrip("/") + "/webhook"
-        for d in destinations
-    )
+    sink_url = os.getenv("DEMO_SINK_URL", read_env().get("DEMO_SINK_URL", "http://demo-sink:8081"))
+    assert any(d["enabled"] and d["url"] == sink_url.rstrip("/") + "/webhook" for d in destinations)
 
     def submit():
         return client.request(
@@ -98,18 +92,14 @@ def run(base, monitoring=False):
         event = client.request(f"/api/events/{event_id}")
         return (
             event
-            if event["deliveries"]
-            and all(d["status"] == "delivered" for d in event["deliveries"])
+            if event["deliveries"] and all(d["status"] == "delivered" for d in event["deliveries"])
             else None
         )
 
     client.request("/api/lab/scenario", {"mode": "normal"})
     event = submit()
     result = poll("successful signed webhook delivery", lambda: delivered(event["id"]))
-    assert all(
-        d["attempts"] and d["attempts"][-1]["http_status"] == 200
-        for d in result["deliveries"]
-    )
+    assert all(d["attempts"] and d["attempts"][-1]["http_status"] == 200 for d in result["deliveries"])
     try:
         client.request("/api/lab/scenario", {"mode": "unavailable"})
         event = submit()
@@ -118,11 +108,7 @@ def run(base, monitoring=False):
             details = client.request(f"/api/events/{event['id']}")
             return (
                 details
-                if any(
-                    a["http_status"] == 503
-                    for d in details["deliveries"]
-                    for a in d["attempts"]
-                )
+                if any(a["http_status"] == 503 for d in details["deliveries"] for a in d["attempts"])
                 else None
             )
 
@@ -149,9 +135,7 @@ def run(base, monitoring=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--base-url", default=os.getenv("API_BASE_URL", "http://localhost:8000")
-    )
+    parser.add_argument("--base-url", default=os.getenv("API_BASE_URL", "http://localhost:8000"))
     parser.add_argument("--monitoring", action="store_true")
     options = parser.parse_args()
     run(options.base_url, options.monitoring)

@@ -16,9 +16,7 @@ import server
 class ReceiverTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.path_patch = patch.object(
-            server, "STATE_PATH", Path(self.temp.name) / "state.json"
-        )
+        self.path_patch = patch.object(server, "STATE_PATH", Path(self.temp.name) / "state.json")
         self.path_patch.start()
         server.SECRET = "s" * 32
         server.CONTROL_TOKEN = "c" * 32
@@ -35,9 +33,7 @@ class ReceiverTests(unittest.TestCase):
         self.temp.cleanup()
 
     def request(self, path, body=None, method=None, headers=None):
-        request = urllib.request.Request(
-            self.base + path, data=body, method=method, headers=headers or {}
-        )
+        request = urllib.request.Request(self.base + path, data=body, method=method, headers=headers or {})
         try:
             return urllib.request.urlopen(request, timeout=5)
         except urllib.error.HTTPError as error:
@@ -46,9 +42,7 @@ class ReceiverTests(unittest.TestCase):
     def deliver(self, signature=None):
         body = b'{"type":"test"}'
         ts = str(int(time.time()))
-        sig = hmac.new(
-            server.SECRET.encode(), ts.encode() + b"." + body, hashlib.sha256
-        ).hexdigest()
+        sig = hmac.new(server.SECRET.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()
         return self.request(
             "/webhook",
             body,
@@ -73,9 +67,7 @@ class ReceiverTests(unittest.TestCase):
         self.assertFalse(server.verify(b"x", "invalid", "bad", server.SECRET))
 
     def test_control_requires_token_and_valid_mode(self):
-        self.assertEqual(
-            self.request("/control", b'{"mode":"unavailable"}', "POST").status, 401
-        )
+        self.assertEqual(self.request("/control", b'{"mode":"unavailable"}', "POST").status, 401)
         self.assertEqual(self.fault("arbitrary-url").status, 422)
         self.assertEqual(self.deliver().status, 200)
 

@@ -2,10 +2,11 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   backend:
@@ -39,6 +40,9 @@ jobs:
       - run: python -m mypy relayops
       - run: python -m pytest -v
       - run: python -m unittest discover -s ../demo-sink -v
+      - run: python -m unittest discover -s ../scripts -p 'test_*.py' -v
+      - run: python -m ruff check ../scripts ../benchmarks ../demo-sink --config pyproject.toml
+      - run: python -m ruff format --check ../scripts ../benchmarks ../demo-sink --config pyproject.toml
       - run: python -m compileall -q ../scripts ../benchmarks ../demo-sink
   frontend:
     runs-on: ubuntu-latest

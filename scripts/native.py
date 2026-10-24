@@ -4,11 +4,32 @@ import argparse
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
 
 from demo import ROOT, initialize, read_env
+
+
+def check_ports(ports):
+    """Fail before migrations or process creation when another local stack is active."""
+    for port in ports:
+        with socket.socket() as listener:
+            try:
+                listener.bind(("127.0.0.1", port))
+            except OSError:
+                raise SystemExit(
+                    f"Local port {port} is in use; stop its owning service before native startup."
+                ) from None
+
+
+def frontend_command():
+    node = shutil.which("node")
+    vite = ROOT / "frontend" / "node_modules" / "vite" / "bin" / "vite.js"
+    if not node or not vite.exists():
+        raise SystemExit("Install Node.js and run npm ci in frontend before --frontend.")
+    return [node, str(vite), "--host", "127.0.0.1", "--port", "8080", "--strictPort"]
 
 
 def main():
@@ -20,6 +41,13 @@ def main():
     )
     parser.add_argument("--api-port", type=int, default=8000)
     args = parser.parse_args()
+    if not 1024 <= args.api_port <= 65535:
+        parser.error("--api-port must be between 1024 and 65535")
+    ports = [args.api_port, 8081, 9001, 9002, 9003] + ([8080] if args.frontend else [])
+    if len(set(ports)) != len(ports):
+        parser.error("--api-port conflicts with another native service")
+    check_ports(ports)
+    frontend = frontend_command() if args.frontend else None
     initialize()
     env = {**read_env(), **os.environ}
     if not env.get("DATABASE_URL"):
@@ -33,14 +61,10 @@ def main():
             "SINK_HOST": "127.0.0.1",
             "SINK_STATE_PATH": str(ROOT / ".local" / "sink" / "fault.json"),
             "OTEL_EXPORTER_OTLP_ENDPOINT": env.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+            "API_PROXY_TARGET": f"http://127.0.0.1:{args.api_port}",
         }
     )
-    executable = (
-        ROOT
-        / "backend"
-        / ".venv"
-        / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    )
+    executable = ROOT / "backend" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     python = str(executable) if executable.exists() else sys.executable
     subprocess.run(
         [python, "-m", "alembic", "upgrade", "head"],
@@ -48,9 +72,7 @@ def main():
         env=env,
         check=True,
     )
-    subprocess.run(
-        [python, "-m", "relayops.bootstrap"], cwd=ROOT / "backend", env=env, check=True
-    )
+    subprocess.run([python, "-m", "relayops.bootstrap"], cwd=ROOT / "backend", env=env, check=True)
     local = ROOT / ".local" / "native"
     local.mkdir(parents=True, exist_ok=True)
     children = []
@@ -96,18 +118,13 @@ def main():
                     "WORKER_METRICS_PORT": str(9001 + index),
                 },
             )
-        if args.frontend:
-            npm = shutil.which("npm")
-            if not npm:
-                raise SystemExit("npm is required for --frontend")
+        if frontend:
             start(
                 "frontend",
-                [npm, "run", "dev", "--", "--host", "127.0.0.1", "--port", "8080"],
+                frontend,
                 ROOT / "frontend",
             )
-        (local / "pids.json").write_text(
-            json.dumps({name: process.pid for name, process in children})
-        )
+        (local / "pids.json").write_text(json.dumps({name: process.pid for name, process in children}))
         print(
             f"Native demo API http://localhost:{args.api_port}; logs in {local}. Ctrl+C stops child processes."
         )

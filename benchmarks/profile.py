@@ -11,10 +11,7 @@ parser.add_argument("component", choices=["api", "worker"])
 args = parser.parse_args()
 output = Path(__file__).resolve().parent / "results"
 output.mkdir(exist_ok=True)
-path = (
-    output
-    / f"{args.component}-{datetime.datetime.now(datetime.UTC):%Y%m%dT%H%M%SZ}.pstats"
-)
+path = output / f"{args.component}-{datetime.datetime.now(datetime.UTC):%Y%m%dT%H%M%SZ}.pstats"
 profiler = cProfile.Profile()
 try:
     profiler.enable()

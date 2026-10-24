@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from smoke import Client
+from smoke import Client  # noqa: E402 - shared local CLI client after adding scripts to the import path
 
 
 def percentile(values, quantile):
@@ -42,16 +42,14 @@ def run(args):
     project = (
         next((p for p in projects if p["id"] == args.project_id), None)
         if args.project_id
-        else projects[0]
+        else next((p for p in projects if p["name"] == "Demo project"), None)
     )
     if not project:
         raise SystemExit("No matching project; initialize the demo first.")
     run_id = uuid.uuid4().hex
     output = ROOT / "benchmarks" / "results" / run_id
     output.mkdir(parents=True)
-    key = client.request(
-        f"/api/projects/{project['id']}/keys", {"name": f"benchmark-{run_id}"}
-    )
+    key = client.request(f"/api/projects/{project['id']}/keys", {"name": f"benchmark-{run_id}"})
     env = {
         **os.environ,
         "BASE_URL": args.base_url,
@@ -126,18 +124,14 @@ def run(args):
                 "/scripts/ingestion.js",
             ]
         else:
-            raise SystemExit(
-                "Install k6 or run the Compose demo with Docker to benchmark."
-            )
+            raise SystemExit("Install k6 or run the Compose demo with Docker to benchmark.")
         code = subprocess.run(command, env=env, check=False).returncode
         deadline = time.monotonic() + args.drain_seconds
         while True:
             events = client.request(f"/api/events?search=benchmark.{run_id}&limit=100")
             details = [client.request(f"/api/events/{event['id']}") for event in events]
             unsettled = any(
-                d["status"] not in {"delivered", "dead_letter"}
-                for e in details
-                for d in e["deliveries"]
+                d["status"] not in {"delivered", "dead_letter"} for e in details for d in e["deliveries"]
             )
             if not unsettled or time.monotonic() >= deadline:
                 break
@@ -211,14 +205,8 @@ if __name__ == "__main__":
         choices=["ingestion", "concurrent", "burst", "sustained", "backpressure"],
         default="sustained",
     )
-    parser.add_argument(
-        "--rate", type=int, choices=range(1, 201), default=20, metavar="1..200"
-    )
-    parser.add_argument(
-        "--vus", type=int, choices=range(1, 101), default=10, metavar="1..100"
-    )
-    parser.add_argument(
-        "--seconds", type=int, choices=range(1, 301), default=30, metavar="1..300"
-    )
+    parser.add_argument("--rate", type=int, choices=range(1, 201), default=20, metavar="1..200")
+    parser.add_argument("--vus", type=int, choices=range(1, 101), default=10, metavar="1..100")
+    parser.add_argument("--seconds", type=int, choices=range(1, 301), default=30, metavar="1..300")
     parser.add_argument("--drain-seconds", type=int, default=60)
     run(parser.parse_args())
