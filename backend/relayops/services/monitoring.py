@@ -11,25 +11,27 @@ def fraction(numerator, denominator):
     return numerator / denominator if denominator else None
 
 
-async def slo(db, hours=24):
+async def slo(db, hours=24, observed_at=None):
+    """Count only matured deliveries, from event acceptance, inside PostgreSQL."""
     cfg = settings()
-    end = now() - timedelta(seconds=cfg.slo_deadline_seconds)
-    start = now() - timedelta(hours=hours)
-    rows = (
-        await db.execute(
-            select(Delivery.created_at, Delivery.delivered_at).where(
-                Delivery.created_at >= start, Delivery.created_at <= end
-            )
-        )
-    ).all()
-    eligible = len(rows)
-    good = sum(
-        1
-        for created, delivered in rows
-        if delivered and (delivered - created).total_seconds() <= cfg.slo_deadline_seconds
+    timestamp = observed_at or now()
+    end = timestamp - timedelta(seconds=cfg.slo_deadline_seconds)
+    start = timestamp - timedelta(hours=hours)
+    timely = (
+        (Delivery.status == "delivered")
+        & (Delivery.delivered_at.is_not(None))
+        & (Delivery.delivered_at >= Event.created_at)
+        & (Delivery.delivered_at <= Event.created_at + timedelta(seconds=cfg.slo_deadline_seconds))
     )
+    eligible, good = (
+        await db.execute(
+            select(func.count(Delivery.id), func.count(Delivery.id).filter(timely))
+            .join(Event, Event.id == Delivery.event_id)
+            .where(Event.created_at >= start, Event.created_at <= end)
+        )
+    ).one()
     compliance = fraction(good, eligible)
-    bad_rate = 1 - compliance if compliance is not None else None
+    bad_rate = fraction(eligible - good, eligible)
     return {
         "target": cfg.slo_target,
         "window_hours": hours,
@@ -41,6 +43,16 @@ async def slo(db, hours=24):
         "burn_rate": bad_rate / (1 - cfg.slo_target) if bad_rate is not None else None,
         "sufficient_data": eligible >= cfg.slo_min_samples,
     }
+
+
+async def objective_windows(db):
+    timestamp = now()
+    long = await slo(db, observed_at=timestamp)
+    short = await slo(db, 1, observed_at=timestamp)
+    long["short_burn_rate"] = short["burn_rate"]
+    long["short_sufficient_data"] = short["sufficient_data"]
+    long["short_eligible"] = short["eligible"]
+    return long
 
 
 async def overview(db):
@@ -66,10 +78,7 @@ async def overview(db):
         .where(Delivery.delivered_at >= now() - timedelta(minutes=5))
     )
     rate = recent / 5
-    long = await slo(db)
-    short = await slo(db, 1)
-    long["short_burn_rate"] = short["burn_rate"]
-    long["short_sufficient_data"] = short["sufficient_data"]
+    long = await objective_windows(db)
     rows = (
         (
             await db.execute(
@@ -108,7 +117,15 @@ async def detect_incidents():
         # A shared monitor lock avoids duplicate evaluation across worker pools.
         if not await db.scalar(text("SELECT pg_try_advisory_xact_lock(7319202)")):
             return
-        evidence = await overview(db)
+        # Monitor evaluation does not need percentile sorts or dashboard chart queries.
+        counts = dict(
+            (await db.execute(select(Delivery.status, func.count()).group_by(Delivery.status))).all()
+        )
+        evidence = {
+            "dead_letter": counts.get("dead_letter", 0),
+            "queue_depth": sum(counts.get(status, 0) for status in ACTIVE),
+            "slo": await objective_windows(db),
+        }
         conditions = []
         if evidence["dead_letter"] >= cfg.incident_dead_letter_threshold:
             conditions.append(
@@ -187,3 +204,8 @@ async def detect_incidents():
                 incident.timeline = incident.timeline + [
                     {"at": stamp.isoformat(), "action": "condition_recurred", "actor": "monitor"}
                 ]
+            elif incident.evidence != details:
+                # Acknowledgement is an operator action, not proof of recovery.
+                # Keep the latest evidence current without flooding the timeline.
+                incident.evidence = details
+                incident.updated_at = stamp
