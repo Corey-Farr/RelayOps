@@ -114,9 +114,10 @@ async def heartbeat(worker_id, state="running"):
 async def run(stop=None):
     cfg = settings()
     worker_id = cfg.worker_id or f"{cfg.worker_region}-{socket.gethostname()}"
+    own_stop = stop is None
     stop = stop or asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
+    for sig in (signal.SIGINT, signal.SIGTERM) if own_stop else ():
         try:
             loop.add_signal_handler(sig, stop.set)
         except NotImplementedError:
@@ -158,7 +159,7 @@ async def run(stop=None):
             except TimeoutError:
                 pass
         if tasks:
-            _, pending = await asyncio.wait(tasks, timeout=35)
+            _, pending = await asyncio.wait(tasks, timeout=cfg.shutdown_grace_seconds)
             for task in pending:
                 task.cancel()
             results = await asyncio.gather(*tasks, return_exceptions=True)

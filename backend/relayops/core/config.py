@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     worker_concurrency: int = 8
     worker_metrics_port: int = 9000
     lease_seconds: int = Field(default=60, ge=35, le=3600)
+    shutdown_grace_seconds: float = Field(default=35, gt=0, le=120)
     heartbeat_seconds: int = Field(default=5, ge=1, le=60)
     failover_seconds: int = Field(default=20, ge=2, le=3600)
     max_queue_depth: int = Field(default=10000, ge=1)

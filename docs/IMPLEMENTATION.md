@@ -93,3 +93,15 @@ browser end-to-end success or benchmark capacity. Those remain separate gates.
   Frontend lint/type checks and 13 unit tests passed. Destination UI compiled in
   a production build; the subsequent overview additions need the final build and
   browser revalidation along with the other pending runtime gates.
+
+## Incident and lifecycle verification
+
+- Ran `scripts/exercise.py`: twenty actual 503 failures, twenty dead letters,
+  automatic threshold-ten incident detection, acknowledgement, receiver restore,
+  twenty successful redrives retaining failed history, and incident resolution.
+- Ran `scripts/fault_modes.py`: normal, intermittent 500, rate-limit 429,
+  real two-second latency and actual timeout all verified through live workers;
+  every sample recovered. Persisted timestamps verified Retry-After scheduling.
+- Added two PostgreSQL-backed graceful-shutdown tests; both passed. They cover
+  finishing in-flight work without another claim and deadline cancellation with
+  recoverable lease state. Grace duration is now explicitly configurable.
