@@ -10,6 +10,7 @@ from relayops.services.policy import retry_delay, retryable
 async def claim(worker_id: str, region: str, limit: int):
     cfg = settings()
     timestamp = now()
+    exhausted = 0
     async with Session.begin() as db:
         pool = await db.get(Pool, region)
         if not pool or pool.paused:
@@ -49,6 +50,7 @@ async def claim(worker_id: str, region: str, limit: int):
                     job.lease_owner = None
                     job.lease_until = None
                     job.lease_version += 1
+                    exhausted += 1
                     continue
                 job.status = "leased"
                 job.lease_owner = worker_id
@@ -57,7 +59,11 @@ async def claim(worker_id: str, region: str, limit: int):
                 job.attempt_count += 1
                 job.cycle_attempt_count += 1
                 claimed.append(job)
-            return claimed
+    # Recovery can exhaust a delivery without another HTTP result. Count only
+    # committed transitions, just as complete() does for observed outcomes.
+    if exhausted:
+        metrics.dead.labels(region).inc(exhausted)
+    return claimed
 
 
 async def begin_dispatch(job, started_at, trace_id: str):

@@ -43,12 +43,19 @@ async def test_crash_leaves_unknown_dispatch_and_reclaim_is_fenced(database):
 
 
 async def test_repeated_crashes_are_bounded_and_redrive_restores_retry_budget(database):
+    from relayops.observability import telemetry as metrics
+
+    counter = metrics.dead.labels("us-east")
+    before = counter._value.get()
     await seed(database)
     for _ in range(database["policy"].max_attempts):
         job = (await claim("crashing", "us-east", 1))[0]
         assert await begin_dispatch(job, now(), "trace")
         await expire(job.id)
     assert await claim("recovery", "us-east", 1) == []
+    assert counter._value.get() == before + 1
+    assert await claim("recovery", "us-east", 1) == []
+    assert counter._value.get() == before + 1
     async with Session.begin() as db:
         saved = await db.get(Delivery, job.id)
         assert saved.status == "dead_letter"

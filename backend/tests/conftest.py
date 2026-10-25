@@ -17,6 +17,9 @@ async def database():
     if not database_name.endswith("_test"):
         pytest.fail("Refusing destructive fixtures: DATABASE_URL database name must end with _test")
     from relayops.core.db import engine, Session
+
+    if engine.url.database != database_name:
+        pytest.fail("Refusing destructive fixtures: configured engine differs from DATABASE_URL")
     from relayops.models import Base, Control, Policy, Pool, Project, Destination, User
     from relayops.security.crypto import encrypt, passwords
     from relayops.services.policy import REGIONS
