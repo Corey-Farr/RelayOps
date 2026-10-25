@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { ActionForm, usePermissions } from "../components/access";
+import { useState, useEffect, type FormEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import {
   AreaChart,
@@ -27,7 +28,6 @@ import {
   Json,
   useAction,
   ConfirmButton,
-  Pager,
 } from "../components/ui";
 export function useData(path: string) {
   return useQuery({
@@ -193,6 +193,8 @@ export function Overview() {
           <p className="note">
             Only deliveries with a completed observation window count toward
             this objective.
+            {!d.slo.sufficient_data &&
+              " Insufficient samples to assess reliability; displayed percentages are preliminary."}
           </p>
         </section>
       </div>
@@ -353,6 +355,9 @@ export function Events() {
   const q = useData(
     `/events?limit=11&offset=${page * 10}&search=${encodeURIComponent(search)}&status=${status}&${params}`,
   );
+  useEffect(() => {
+    if (q.isSuccess && q.data.length === 0 && page > 0) setPage(page - 1);
+  }, [q.isSuccess, q.data, page]);
   return (
     <>
       <PageTitle
@@ -643,16 +648,16 @@ export function DeadLetters() {
   );
 }
 export function Incidents() {
-  const q = useData("/incidents");
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
   const [page, setPage] = useState(0);
-  const rows =
-    q.data?.filter(
-      (i: any) =>
-        (!status || i.status === status) &&
-        (!severity || i.severity === severity),
-    ) ?? [];
+  const q = useData(
+    `/incidents?limit=11&offset=${page * 10}&status=${status}&severity=${severity}`,
+  );
+  const rows = q.data ?? [];
+  useEffect(() => {
+    if (q.isSuccess && q.data.length === 0 && page > 0) setPage(page - 1);
+  }, [q.isSuccess, q.data, page]);
   return (
     <>
       <PageTitle
@@ -698,7 +703,7 @@ export function Incidents() {
           <Failure error={q.error} />
         ) : rows.length ? (
           <>
-            {rows.slice(page * 10, page * 10 + 10).map((i: any) => (
+            {rows.slice(0, 10).map((i: any) => (
               <Link
                 className="incident list-item"
                 key={i.id}
@@ -716,7 +721,18 @@ export function Incidents() {
                 <Status value={i.status} />
               </Link>
             ))}
-            <Pager page={page} setPage={setPage} total={rows.length} />
+            <div className="pagination" aria-label="Incident pages">
+              <button disabled={page === 0} onClick={() => setPage(page - 1)}>
+                Previous page
+              </button>
+              <span>Page {page + 1}</span>
+              <button
+                disabled={rows.length <= 10}
+                onClick={() => setPage(page + 1)}
+              >
+                Next page
+              </button>
+            </div>
           </>
         ) : (
           <Empty>No incidents match these filters.</Empty>
@@ -726,6 +742,7 @@ export function Incidents() {
   );
 }
 export function IncidentDetail() {
+  const { canOperate } = usePermissions();
   const { id } = useParams();
   const q = useData(`/incidents/${id}`);
   const ack = useAction(`/incidents/${id}/acknowledge`);
@@ -751,7 +768,7 @@ export function IncidentDetail() {
           {i.status === "open" && (
             <button
               className="primary"
-              disabled={ack.isPending}
+              disabled={ack.isPending || !canOperate}
               onClick={() => ack.mutate(undefined)}
             >
               Acknowledge incident
@@ -784,13 +801,16 @@ export function IncidentDetail() {
   );
 }
 export function EventSubmit({ projectId }: { projectId: string }) {
-  const m = useAction("/events");
+  const [pending, setPending] = useState(false);
+  const { canOperate } = usePermissions();
+  const queryClient = useQueryClient();
   const [type, setType] = useState("order.created");
   const [payload, setPayload] = useState('{"order_id":"demo-001"}');
   const [error, setError] = useState("");
   const [id, setId] = useState("");
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (pending || !canOperate) return;
     setError("");
     let parsed;
     try {
@@ -803,6 +823,7 @@ export function EventSubmit({ projectId }: { projectId: string }) {
       setError("Payload must be a JSON object.");
       return;
     }
+    setPending(true);
     try {
       const result = await api(
         "/events",
@@ -811,12 +832,15 @@ export function EventSubmit({ projectId }: { projectId: string }) {
         { "Idempotency-Key": crypto.randomUUID() },
       );
       setId(result.id);
+      void queryClient.invalidateQueries();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setPending(false);
     }
   }
   return (
-    <form onSubmit={submit} className="form">
+    <ActionForm onSubmit={submit} className="form">
       <h3>Submit an event</h3>
       <label>
         Event type
@@ -840,14 +864,14 @@ export function EventSubmit({ projectId }: { projectId: string }) {
           {error}
         </p>
       )}
-      <button className="primary" disabled={!projectId || m.isPending}>
-        Submit event
+      <button className="primary" disabled={!projectId || pending}>
+        {pending ? "Submitting…" : "Submit event"}
       </button>
       {id && (
         <p role="status">
           Event accepted. <Link to={`/events/${id}`}>View delivery</Link>
         </p>
       )}
-    </form>
+    </ActionForm>
   );
 }

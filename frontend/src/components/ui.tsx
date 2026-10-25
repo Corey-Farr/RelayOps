@@ -1,7 +1,11 @@
+import { usePermissions } from "./access";
 import {
   createContext,
   useContext,
   useState,
+  useRef,
+  useId,
+  useEffect,
   type ReactNode,
   Component,
   type ErrorInfo,
@@ -30,9 +34,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 export function useAction(path: string, method = "POST") {
   const client = useQueryClient();
+  const { canOperate, canAdmin } = usePermissions();
+  const allowed = /^\/(projects|keys)(\/|$)/.test(path) ? canAdmin : canOperate;
   const toast = useContext(ToastContext);
   return useMutation({
-    mutationFn: (body?: unknown) => api(path, method, body),
+    mutationFn: (body?: unknown) =>
+      allowed
+        ? api(path, method, body)
+        : Promise.reject(new Error("Your role does not permit this action.")),
     onSuccess: () => {
       void client.invalidateQueries();
       toast("Change saved successfully.");
@@ -113,38 +122,56 @@ export function ConfirmButton({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const { canOperate } = usePermissions();
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    if (open) dialogRef.current?.showModal();
+    else dialogRef.current?.close();
+  }, [open]);
   return (
     <>
-      <button disabled={disabled} onClick={() => setOpen(true)}>
+      <button disabled={disabled || !canOperate} onClick={() => setOpen(true)}>
         {children}
       </button>
-      {open && (
-        <div className="modal-backdrop">
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="confirm-title"
-            className="modal"
+      <dialog
+        ref={dialogRef}
+        onCancel={() => setOpen(false)}
+        onClose={() => setOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const buttons = dialogRef.current?.querySelectorAll("button");
+          if (!buttons?.length) return;
+          const first = buttons[0];
+          const last = buttons[buttons.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+        aria-labelledby={titleId}
+        className="modal"
+      >
+        <h2 id={titleId}>Confirm {children}</h2>
+        <p>This changes live system state. Continue with this action?</p>
+        <div className="actions">
+          <button autoFocus onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+          <button
+            className="primary"
+            onClick={() => {
+              onConfirm();
+              setOpen(false);
+            }}
           >
-            <h2 id="confirm-title">Confirm {children}</h2>
-            <p>This changes live system state. Continue with this action?</p>
-            <div className="actions">
-              <button autoFocus onClick={() => setOpen(false)}>
-                Cancel
-              </button>
-              <button
-                className="primary"
-                onClick={() => {
-                  onConfirm();
-                  setOpen(false);
-                }}
-              >
-                Confirm
-              </button>
-            </div>
-          </section>
+            Confirm
+          </button>
         </div>
-      )}
+      </dialog>
     </>
   );
 }
@@ -188,6 +215,10 @@ export function Pager({
   total: number;
   size?: number;
 }) {
+  const lastPage = Math.max(0, Math.ceil(total / size) - 1);
+  useEffect(() => {
+    if (page > lastPage) setPage(lastPage);
+  }, [page, lastPage, setPage]);
   return (
     <div className="pager">
       <span>

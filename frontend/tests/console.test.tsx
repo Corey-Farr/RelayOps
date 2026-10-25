@@ -1,3 +1,5 @@
+import { RoleContext, ActionForm } from "../src/components/access";
+import { Pager } from "../src/components/ui";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,12 +11,17 @@ import {
   Events,
   EventDetail,
   IncidentDetail,
+  Incidents,
   EventSubmit,
 } from "../src/pages/Operations";
 import { Policies, Login } from "../src/pages/Controls";
 import { ToastProvider } from "../src/components/ui";
 import { api, setCsrf } from "../src/services/api";
-function wrap(child: ReactNode, path = "/") {
+function wrap(
+  child: ReactNode,
+  path = "/",
+  role: "admin" | "operator" | "viewer" = "admin",
+) {
   return render(
     <QueryClientProvider
       client={
@@ -27,21 +34,21 @@ function wrap(child: ReactNode, path = "/") {
       }
     >
       <MemoryRouter initialEntries={[path]}>
-        <ToastProvider>{child}</ToastProvider>
+        <RoleContext.Provider value={role}>
+          <ToastProvider>{child}</ToastProvider>
+        </RoleContext.Provider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 function mock(data: unknown, status = 200) {
-  return vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(
-      async () =>
-        new Response(JSON.stringify(data), {
-          status,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
+  return vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () =>
+      new Response(JSON.stringify(data), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
 }
 const event = {
   id: "event-123",
@@ -274,5 +281,86 @@ describe("operational controls", () => {
   it("sanitizes structured server validation into a readable error", async () => {
     mock({ detail: [{ msg: "Field required" }] }, 422);
     await expect(api("/events", "POST", {})).rejects.toThrow("Field required");
+  });
+});
+
+describe("role-aware controls and pagination", () => {
+  it("filters incidents on the server before pagination", async () => {
+    const fetch = mock([]);
+    wrap(<Incidents />);
+    await userEvent.selectOptions(
+      screen.getByLabelText("Severity"),
+      "critical",
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/incidents?limit=11&offset=0&status=&severity=critical",
+        expect.any(Object),
+      ),
+    );
+  });
+  it("withholds policy percentages and latency until samples are sufficient", async () => {
+    mock({
+      stable: null,
+      candidate: null,
+      canary_percent: 0,
+      history: [],
+      comparison: [
+        {
+          policy_id: "policy-small",
+          total: 1,
+          delivered: 1,
+          dead_letter: 0,
+          terminal_samples: 1,
+          success_rate: 1,
+          p95_latency_ms: 123,
+          sufficient_data: false,
+          latency_sufficient_data: false,
+        },
+      ],
+    });
+    wrap(<Policies />);
+    expect(await screen.findAllByText("Insufficient data")).toHaveLength(2);
+    expect(screen.queryByText("123 ms")).not.toBeInTheDocument();
+    expect(screen.queryByText("100.00%")).not.toBeInTheDocument();
+  });
+  it("keeps viewers from submitting events", () => {
+    wrap(<EventSubmit projectId="p1" />, "/", "viewer");
+    expect(screen.getByRole("button", { name: "Submit event" })).toBeDisabled();
+    expect(screen.getByLabelText("Event type")).toBeDisabled();
+    expect(
+      screen.getByText("Operator access required to make changes."),
+    ).toBeVisible();
+  });
+  it("allows operator operations but requires admin for project management", () => {
+    wrap(
+      <>
+        <ActionForm>
+          <button>Operate</button>
+        </ActionForm>
+        <ActionForm admin>
+          <button>Create project</button>
+        </ActionForm>
+      </>,
+      "/",
+      "operator",
+    );
+    expect(screen.getByRole("button", { name: "Operate" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Create project" }),
+    ).toBeDisabled();
+  });
+  it("returns to the last valid page when live data shrinks", async () => {
+    const setPage = vi.fn();
+    wrap(<Pager page={3} setPage={setPage} total={11} />);
+    await waitFor(() => expect(setPage).toHaveBeenCalledWith(1));
+  });
+  it("prevents duplicate submissions while an event request is pending", async () => {
+    vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise(() => {}));
+    wrap(<EventSubmit projectId="p1" />);
+    await userEvent.click(screen.getByRole("button", { name: "Submit event" }));
+    expect(
+      await screen.findByRole("button", { name: "Submitting…" }),
+    ).toBeDisabled();
   });
 });

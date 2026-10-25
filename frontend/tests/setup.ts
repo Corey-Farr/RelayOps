@@ -11,3 +11,11 @@ class ResizeObserverMock {
   disconnect() {}
 }
 vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
+// jsdom has no native modal implementation; browser focus behavior is covered by Playwright.
+HTMLDialogElement.prototype.showModal = function () {
+  this.setAttribute("open", "");
+};
+HTMLDialogElement.prototype.close = function () {
+  this.removeAttribute("open");
+};

@@ -1201,3 +1201,28 @@ td .mono {
     transition: none !important;
   }
 }
+/* Native modal dialogs trap keyboard focus and restore it to the trigger. */
+dialog.modal {
+  border: 1px solid #e3e9ef;
+  margin: auto;
+  color: #213148;
+}
+dialog.modal::backdrop {
+  background: #0d1d35aa;
+}
+dialog.modal:not([open]) {
+  display: none;
+}
+.action-fields {
+  display: contents;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.action-fields:disabled input,
+.action-fields:disabled select,
+.action-fields:disabled textarea {
+  background: #f5f7fa;
+  color: #7b899b;
+}

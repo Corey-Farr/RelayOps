@@ -28,6 +28,24 @@ test("login, select demo project, deliver, fail and recover a real webhook", asy
     await expect(
       page.getByRole("heading", { name: "Demo receiver", exact: true }),
     ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Edit destination", exact: true })
+      .click();
+    await expect(
+      page.getByLabel("Event subscriptions", { exact: true }),
+    ).toHaveValue("*");
+    const saved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/destinations/") &&
+        response.request().method() === "PATCH",
+    );
+    await page
+      .getByRole("button", { name: "Save destination", exact: true })
+      .click();
+    expect((await saved).status()).toBe(200);
+    await expect(
+      page.getByRole("button", { name: "Edit destination", exact: true }),
+    ).toBeVisible();
     await page.getByLabel("Event type", { exact: true }).fill("e2e.normal");
     await page
       .getByLabel("JSON payload")
@@ -100,12 +118,58 @@ test("login, select demo project, deliver, fail and recover a real webhook", asy
     await expect(page.getByText(/HTTP 503/).first()).toBeVisible();
     await expect(page.getByText(/HTTP 200/).first()).toBeVisible();
     await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(page.locator(".recharts-surface").first()).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Delivery overview" }),
     ).toBeVisible();
+    // A native confirmation dialog must contain keyboard focus without changing state.
+    await page.getByRole("link", { name: "Worker pools", exact: true }).click();
+    const pause = page
+      .getByRole("button", { name: "Pause pool", exact: true })
+      .first();
+    await pause.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      dialog.getByRole("button", { name: "Confirm", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(pause).toBeFocused();
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(page.locator(".recharts-surface").first()).toBeVisible();
     if (process.env.CAPTURE_SCREENSHOTS)
       await page.screenshot({
         path: "../docs/screenshots/overview.png",
+        fullPage: true,
+      });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await page
+      .getByRole("link", { name: "Event explorer", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Event explorer" }),
+    ).toBeVisible();
+    await expect
+      .poll(async () =>
+        page
+          .locator(".sidebar")
+          .evaluate((el) => el.getBoundingClientRect().right),
+      )
+      .toBeLessThanOrEqual(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    if (process.env.CAPTURE_SCREENSHOTS)
+      await page.screenshot({
+        path: "../docs/screenshots/mobile-events.png",
         fullPage: true,
       });
   } finally {

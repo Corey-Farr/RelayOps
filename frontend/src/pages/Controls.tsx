@@ -1,3 +1,4 @@
+import { ActionForm, AdminOnly, usePermissions } from "../components/access";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +23,7 @@ const scenarios = [
   ["unavailable", "Destination outage", "All requests fail with HTTP 503"],
 ];
 export function Lab() {
+  const { canOperate } = usePermissions();
   const q = useData("/lab");
   const projects = useData("/projects");
   const [project, setProject] = useState("");
@@ -67,7 +69,7 @@ export function Lab() {
                 <button
                   key={mode}
                   className={`scenario ${q.data.mode === mode ? "selected" : ""}`}
-                  disabled={scenario.isPending}
+                  disabled={scenario.isPending || !canOperate}
                   onClick={() => scenario.mutate({ mode })}
                 >
                   <span className="scenario-indicator" />
@@ -94,7 +96,7 @@ export function Lab() {
               Seed 42 produces reproducible payloads. A burst is limited to 100
               real events.
             </p>
-            <form
+            <ActionForm
               className="inline-form"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -135,7 +137,7 @@ export function Lab() {
               >
                 {generate.isPending ? "Generating…" : "Generate events"}
               </button>
-            </form>
+            </ActionForm>
             {generate.data && (
               <p role="status">
                 Accepted {generate.data.accepted} events. Follow delivery in the
@@ -276,7 +278,7 @@ export function Policies() {
             <p className="note">
               Existing deliveries retain their selected policy through retries.
             </p>
-            <form className="form-grid" onSubmit={submit}>
+            <ActionForm className="form-grid" onSubmit={submit}>
               {Object.entries(values).map(([key, value]) => (
                 <label key={key}>
                   {
@@ -329,7 +331,7 @@ export function Policies() {
                   {error}
                 </p>
               )}
-            </form>
+            </ActionForm>
           </section>
           <section className="panel">
             <h2>Measured policy outcomes</h2>
@@ -342,8 +344,9 @@ export function Policies() {
                       <th>Deliveries</th>
                       <th>Delivered</th>
                       <th>Dead letters</th>
+                      <th>Terminal samples</th>
                       <th>Success</th>
-                      <th>p95 latency</th>
+                      <th>p95 end-to-end latency</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -353,9 +356,15 @@ export function Policies() {
                         <td>{c.total}</td>
                         <td>{c.delivered}</td>
                         <td>{c.dead_letter}</td>
-                        <td>{percent(c.success_rate)}</td>
+                        <td>{c.terminal_samples}</td>
                         <td>
-                          {c.p95_latency_ms == null
+                          {c.sufficient_data
+                            ? percent(c.success_rate)
+                            : "Insufficient data"}
+                        </td>
+                        <td>
+                          {!c.latency_sufficient_data ||
+                          c.p95_latency_ms == null
                             ? "Insufficient data"
                             : `${Math.round(c.p95_latency_ms)} ms`}
                         </td>
@@ -429,7 +438,8 @@ export function Settings() {
                 ))}
               </select>
             </label>
-            <form
+            <ActionForm
+              admin
               className="inline-form"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -458,7 +468,7 @@ export function Settings() {
               <button disabled={add.isPending} className="primary">
                 Create project
               </button>
-            </form>
+            </ActionForm>
           </div>
         )}
       </section>
@@ -467,7 +477,9 @@ export function Settings() {
           <Destinations projectId={project} />
           <div className="two-grid">
             <section className="panel">
-              <Keys projectId={project} />
+              <AdminOnly>
+                <Keys projectId={project} />
+              </AdminOnly>
             </section>
             <section className="panel">
               <EventSubmit projectId={project} />
@@ -513,7 +525,7 @@ function Destinations({ projectId }: { projectId: string }) {
       ) : (
         <Empty>No destinations for this project.</Empty>
       )}
-      <form
+      <ActionForm
         className="form-grid"
         onSubmit={(e) => {
           e.preventDefault();
@@ -567,7 +579,7 @@ function Destinations({ projectId }: { projectId: string }) {
             Add destination
           </button>
         </div>
-      </form>
+      </ActionForm>
       {secret && (
         <div className="secret" role="status">
           <strong>Signing secret — shown once</strong>
@@ -617,6 +629,7 @@ export function DestinationPage() {
   );
 }
 function Destination({ d }: { d: any }) {
+  const { canOperate } = usePermissions();
   const toggle = useAction(`/destinations/${d.id}`, "PATCH");
   const health = useData(`/destinations/${d.id}/health`);
   const test = useAction(`/destinations/${d.id}/test`);
@@ -643,11 +656,11 @@ function Destination({ d }: { d: any }) {
         </div>
       </div>
       <div className="actions">
-        <button onClick={() => setEditing(!editing)}>
+        <button disabled={!canOperate} onClick={() => setEditing(!editing)}>
           {editing ? "Cancel editing" : "Edit destination"}
         </button>
         <button
-          disabled={!d.enabled || test.isPending}
+          disabled={!canOperate || !d.enabled || test.isPending}
           onClick={() => test.mutate(undefined)}
         >
           Send test event
@@ -657,7 +670,7 @@ function Destination({ d }: { d: any }) {
         )}
       </div>
       {editing && (
-        <form
+        <ActionForm
           className="form"
           onSubmit={(e) => {
             e.preventDefault();
@@ -701,7 +714,7 @@ function Destination({ d }: { d: any }) {
             />
           </label>
           <button disabled={toggle.isPending}>Save destination</button>
-        </form>
+        </ActionForm>
       )}
       {health.isPending ? (
         <Loading />
@@ -752,7 +765,7 @@ function Keys({ projectId }: { projectId: string }) {
       ) : (
         <Empty>No API keys created.</Empty>
       )}
-      <form
+      <ActionForm
         className="form"
         onSubmit={(e) => {
           e.preventDefault();
@@ -777,7 +790,7 @@ function Keys({ projectId }: { projectId: string }) {
           />
         </label>
         <button disabled={create.isPending}>Create API key</button>
-      </form>
+      </ActionForm>
       {key && (
         <div className="secret" role="status">
           <strong>Copy this key now. It will not be shown again.</strong>
