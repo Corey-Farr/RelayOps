@@ -1,5 +1,7 @@
 import json
 import logging
+import traceback
+from datetime import datetime, timezone
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -34,7 +36,21 @@ tracer = trace.get_tracer("relayops")
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
-        return json.dumps({"level": record.levelname, "logger": record.name, "message": record.getMessage()})
+        entry = {
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            # Exception messages can contain SQL parameters, credentials or payloads.
+            # Keep the type and code locations without serializing values or locals.
+            entry["exception_type"] = record.exc_info[0].__name__
+            entry["stack"] = [
+                {"file": frame.filename, "line": frame.lineno, "function": frame.name}
+                for frame in traceback.extract_tb(record.exc_info[2])
+            ]
+        return json.dumps(entry)
 
 
 def setup(service: str):

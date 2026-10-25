@@ -45,6 +45,10 @@ make smoke    # Verify actual ingestion, delivery and retry recovery
 `make clean` deletes demo volumes and their data. It is not an ordinary shutdown
 or recovery command. No cloud account or external API key is required.
 
+Without Docker, an existing PostgreSQL server can run the application through
+`scripts/native.py --frontend`; see [native development](docs/NATIVE.md).
+That path starts the API, receiver, three workers and Vite, but not monitoring.
+
 ## Architecture and capabilities
 
 ```mermaid
@@ -154,9 +158,14 @@ docs/             Architecture, operations and evidence
 
 ## Screenshots and limitations
 
-Screenshots, when captured from a running system, belong in `docs/screenshots/`.
-See the verification ledger for available evidence. No stock/mock operational
-screenshots are used.
+These screenshots show the running native application and persisted delivery data.
+
+![Operations overview](docs/screenshots/overview.png)
+![Delivery attempt history](docs/screenshots/event-delivery.png)
+
+The [mobile event explorer](docs/screenshots/mobile-events.png) was also checked
+in Chromium. See the [verification ledger](docs/IMPLEMENTATION.md) and
+[requirements audit](docs/REQUIREMENTS.md) for executed checks and limitations.
 
 This is a single-database local deployment. It does not provide geographic
 redundancy, automatic database disaster recovery or an independently audited

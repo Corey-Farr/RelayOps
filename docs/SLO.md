@@ -7,15 +7,14 @@ without matching destinations do not create an artificial successful delivery.
 
 ## Observation windows
 
-Only deliveries created at least `SLO_DEADLINE_SECONDS` ago enter the denominator.
+Only deliveries whose events were accepted at least `SLO_DEADLINE_SECONDS` ago enter the denominator.
 A successful acknowledgement must have been persisted within that deadline to
 enter the numerator. Pending, leased, retrying, dead-lettered and late-successful
 deliveries count as bad once their window matures. In-flight work is never
 counted as successful merely because it has not failed yet.
 
-The implementation uses UTC timestamps. The database transaction creates each
-delivery alongside its event; this is the delivery acceptance timestamp used by
-the calculation. A redrive retains the original acceptance time and does not
+The implementation uses UTC `Event.created_at` timestamps, including for the
+deadline and both observation windows. A redrive retains the original acceptance time and does not
 erase a missed deadline.
 
 ## Calculations
@@ -42,7 +41,7 @@ percentage exists.
 ## Alert conditions
 
 The monitor compares a 24-hour window and a one-hour window. Both must have the
-configured minimum sample count, and both must have burn rate at least 2 before
+configured minimum sample count, and both must reach `INCIDENT_BURN_THRESHOLD` (default 2) before
 the SLO condition opens an incident. This avoids alerting from one isolated
 failure in an otherwise empty sample. These are overlapping local demonstration
 windows, not a statistically calibrated paging policy for every workload.

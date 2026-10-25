@@ -5,7 +5,7 @@ import signal
 import socket
 import time
 import httpx
-from opentelemetry.propagate import extract
+from opentelemetry.propagate import extract, inject
 from prometheus_client import start_http_server
 from sqlalchemy import func, select
 from relayops.core.config import settings
@@ -57,6 +57,7 @@ async def dispatch(job, client):
         span.set_attribute("relayops.delivery_id", job.id)
         span.set_attribute("relayops.region", region)
         trace_id = f"{span.get_span_context().trace_id:032x}"
+        inject(headers)
         if not await begin_dispatch(job, started, trace_id):
             return
         clock = time.monotonic()
@@ -106,9 +107,9 @@ async def heartbeat(worker_id, state="running"):
         active = await db.scalar(
             select(func.count()).select_from(Delivery).where(Delivery.status == "leased")
         )
-        metrics.queue.set(depth or 0)
-        metrics.inflight.set(active or 0)
-        metrics.heartbeat.labels(cfg.worker_region).set(time.time())
+    metrics.queue.set(depth or 0)
+    metrics.inflight.set(active or 0)
+    metrics.heartbeat.labels(cfg.worker_region).set(time.time())
 
 
 async def run(stop=None):

@@ -18,9 +18,7 @@ def run(base, output):
         raise ValueError("Demo mode required")
     if client.request("/api/policies")["candidate"]:
         raise ValueError("Finish the active candidate before running fault checks")
-    project = next(
-        p for p in client.request("/api/projects") if p["name"] == "Demo project"
-    )
+    project = next(p for p in client.request("/api/projects") if p["name"] == "Demo project")
     results = []
     for mode in ["normal", "intermittent", "rate_limit", "latency", "timeout"]:
         candidate = None
@@ -43,11 +41,7 @@ def run(base, output):
 
             def attempted():
                 event = client.request(f"/api/events/{identifier}")
-                return (
-                    event
-                    if event["deliveries"] and event["deliveries"][0]["attempts"]
-                    else None
-                )
+                return event if event["deliveries"] and event["deliveries"][0]["attempts"] else None
 
             first = poll(f"{mode} first real attempt", attempted)
             attempt = first["deliveries"][0]["attempts"][0]
@@ -61,10 +55,7 @@ def run(base, output):
             }[mode]
             assert attempt["http_status"] == expected, (mode, attempt)
             if mode == "timeout":
-                assert (
-                    attempt["failure_category"] == "timeout"
-                    and attempt["duration_ms"] >= 400
-                )
+                assert attempt["failure_category"] == "timeout" and attempt["duration_ms"] >= 400
             if mode == "latency":
                 assert attempt["duration_ms"] >= 1900
             client.request("/api/lab/scenario", {"mode": "normal"})
@@ -99,17 +90,12 @@ def run(base, output):
             finally:
                 if candidate:
                     current = client.request("/api/policies")
-                    if (
-                        current["candidate"]
-                        and current["candidate"]["id"] == candidate["id"]
-                    ):
+                    if current["candidate"] and current["candidate"]["id"] == candidate["id"]:
                         client.request("/api/policies/rollback", {}, method="POST")
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(
-            {"recorded_at": datetime.now(UTC).isoformat(), "results": results}, indent=2
-        ),
+        json.dumps({"recorded_at": datetime.now(UTC).isoformat(), "results": results}, indent=2),
         encoding="utf-8",
     )
 

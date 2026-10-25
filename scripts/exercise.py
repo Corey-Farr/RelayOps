@@ -21,15 +21,11 @@ def run(base, output):
         raise ValueError("Finish the existing candidate rollout before this exercise")
     if client.request("/api/overview")["queue_depth"]:
         raise ValueError("Drain existing work before this exercise")
-    project = next(
-        p for p in client.request("/api/projects") if p["name"] == "Demo project"
-    )
+    project = next(p for p in client.request("/api/projects") if p["name"] == "Demo project")
     timeline = []
 
     def record(action, **evidence):
-        timeline.append(
-            {"at": datetime.now(UTC).isoformat(), "action": action, **evidence}
-        )
+        timeline.append({"at": datetime.now(UTC).isoformat(), "action": action, **evidence})
 
     event_ids = []
     candidate = None
@@ -53,16 +49,12 @@ def run(base, output):
         record("events_accepted", count=len(event_ids))
 
         def all_in_state(state):
-            events = [
-                client.request(f"/api/events/{identifier}") for identifier in event_ids
-            ]
+            events = [client.request(f"/api/events/{identifier}") for identifier in event_ids]
             return events if all(e["status"] == state for e in events) else None
 
         failed = poll("20 dead-letter events", lambda: all_in_state("dead_letter"))
         assert all(
-            any(a["http_status"] == 503 for a in d["attempts"])
-            for e in failed
-            for d in e["deliveries"]
+            any(a["http_status"] == 503 for a in d["attempts"]) for e in failed for d in e["deliveries"]
         )
         record("dead_letters_observed", count=len(failed))
 
@@ -82,26 +74,18 @@ def run(base, output):
             incident_id=incident["id"],
             evidence=incident["evidence"],
         )
-        acknowledged = client.request(
-            f"/api/incidents/{incident['id']}/acknowledge", {}, method="POST"
-        )
+        acknowledged = client.request(f"/api/incidents/{incident['id']}/acknowledge", {}, method="POST")
         assert acknowledged["status"] == "acknowledged"
         record("incident_acknowledged")
         client.request("/api/lab/scenario", {"mode": "normal"})
         record("receiver_restored")
         for event in failed:
             for delivery in event["deliveries"]:
-                client.request(
-                    f"/api/deliveries/{delivery['id']}/redrive", {}, method="POST"
-                )
-        recovered = poll(
-            "redriven deliveries recovered", lambda: all_in_state("delivered")
-        )
+                client.request(f"/api/deliveries/{delivery['id']}/redrive", {}, method="POST")
+        recovered = poll("redriven deliveries recovered", lambda: all_in_state("delivered"))
         assert all(len(d["attempts"]) >= 2 for e in recovered for d in e["deliveries"])
         record("deliveries_recovered", count=len(recovered))
-        resolved = client.request(
-            f"/api/incidents/{incident['id']}/resolve", {}, method="POST"
-        )
+        resolved = client.request(f"/api/incidents/{incident['id']}/resolve", {}, method="POST")
         assert resolved["status"] == "resolved"
         record("incident_resolved")
         report = {
@@ -136,10 +120,7 @@ def run(base, output):
         finally:
             if candidate:
                 current = client.request("/api/policies")
-                if (
-                    current["candidate"]
-                    and current["candidate"]["id"] == candidate["id"]
-                ):
+                if current["candidate"] and current["candidate"]["id"] == candidate["id"]:
                     client.request("/api/policies/rollback", {}, method="POST")
 
 

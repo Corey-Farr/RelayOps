@@ -67,9 +67,14 @@
       },
       "targets": [
         {
-          "expr": "sum by (__name__) (rate({__name__=~\"relayops_deliveries_(succeeded|failed)_total\"}[5m]))",
+          "expr": "sum(rate(relayops_deliveries_succeeded_total[5m]))",
           "refId": "A",
-          "legendFormat": "{{region}} {{__name__}}"
+          "legendFormat": "Acknowledged"
+        },
+        {
+          "expr": "sum(rate(relayops_deliveries_failed_total[5m]))",
+          "refId": "B",
+          "legendFormat": "Failed attempts"
         }
       ],
       "fieldConfig": {

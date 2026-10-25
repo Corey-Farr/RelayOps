@@ -488,11 +488,23 @@ async def control_pool(region: str, action: str, user=Depends(operator), db=Depe
 
 
 @app.get("/api/incidents")
-async def incidents(user=Depends(identity), db=Depends(session)):
-    return [
-        serialize(i)
-        for i in (await db.scalars(select(Incident).order_by(Incident.created_at.desc()).limit(200))).all()
-    ]
+async def incidents(
+    status: str | None = None,
+    severity: str | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    user=Depends(identity),
+    db=Depends(session),
+):
+    query = select(Incident)
+    if status:
+        query = query.where(Incident.status == status)
+    if severity:
+        query = query.where(Incident.severity == severity)
+    rows = await db.scalars(
+        query.order_by(Incident.created_at.desc(), Incident.id).offset(offset).limit(limit)
+    )
+    return [serialize(i) for i in rows.all()]
 
 
 @app.get("/api/incidents/{identifier}")

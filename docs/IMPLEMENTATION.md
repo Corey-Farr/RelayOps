@@ -1,107 +1,89 @@
 # Implementation and verification ledger
 
-RelayOps is being built against the supplied master requirements. Completion claims
-require executed checks; implementation alone is not validation.
+Verified on 2026-10-24 (America/Phoenix). This ledger supersedes earlier milestone
+counts. The full requirement mapping is in [REQUIREMENTS](REQUIREMENTS.md).
 
-## Work streams
+## Implemented
 
-- Backend: durable PostgreSQL queue, ingestion, authentication, control plane,
-  workers, telemetry, incidents, policies, migrations and behavioral tests.
-- Frontend: authenticated operational console, real API actions, unit and browser tests.
-- Infrastructure: local Compose stack, signature-verifying fault sink, bootstrap,
-  smoke tests, monitoring, CI and benchmarking.
-- Integration: security review, real PostgreSQL validation where possible,
-  documentation, repository hygiene and final measured evidence.
+- FastAPI/PostgreSQL durable event and delivery storage, transactional admission,
+  scoped idempotency, bounded backpressure, SKIP LOCKED claims, expiring fenced
+  leases, pre-dispatch intent journal and immutable attempt history.
+- Asynchronous HTTP workers, HMAC signatures, bounded jittered retries,
+  Retry-After, dead letters, history-preserving redrive and graceful draining.
+- Three logical regional pools, heartbeat/health controls, pause/resume and
+  failover. Stable/candidate delivery policies use deterministic assignment and
+  preserve the selected version through retries and rollback.
+- React operations console: overview, searchable events and detailed timelines,
+  destinations with editing/test/health, dead letters, workers, incidents, demo
+  fault lab, policy release controls, projects/API keys and access information.
+- Hashed passwords and API keys, encrypted signing secrets, session/CSRF protection,
+  role enforcement, input bounds, URL allowlisting, login throttling and audit logs.
+- Matured SQL SLO windows, minimum sample gates, configurable incident thresholds,
+  incident deduplication/acknowledgement/resolution and paginated history.
+- Prometheus metrics, provisioned Grafana dashboard, connected OpenTelemetry traces,
+  JSON diagnostics, Docker/CI/release definitions, reproducible locks and runbooks.
 
-## Environment
+## Executed verification
 
-Initial environment: Windows, Python 3.13.1, Node 22.13.1, npm 10.9.2.
-Docker and PostgreSQL were not on PATH at task start. An isolated native PostgreSQL
-17.11 instance was started on loopback port 56483. Docker-specific validation
-remains unavailable and must be reported separately.
+| Check | Result |
+| --- | --- |
+| Backend pytest against isolated PostgreSQL | 57 passed in 12.43s |
+| Backend Ruff lint/format and mypy | Passed; mypy checked 22 source files |
+| Frontend Vitest | 19 passed |
+| Frontend lint, TypeScript, production build | Passed; bundle warning remains below |
+| Real Chromium Playwright | Passed in 9.4s: login, project/destination configuration, actual delivery 200, actual 503, recovery 200, dialog keyboard/focus, mobile navigation/layout |
+| Native launcher regression tests | 5 passed |
+| Demo receiver signature/fault tests | 4 passed |
+| Infrastructure Python lint/format | Passed after final formatting |
+| Workflow actionlint | Both workflows passed |
+| Migration round trip | Fresh upgrade, downgrade to base and re-upgrade passed; existing native demo upgraded |
+| Real smoke | Signed delivery, persisted failed attempt, retry/recovery, three pools and metrics passed |
+| Monitoring | Four scrape targets up; Grafana health/provisioning/datasource verified; all 14 dashboard queries executed; linked API/worker traces queried from Jaeger2 |
 
-## Executed checks
+The integration suite includes concurrent ingestion/claims, atomic rollback,
+lease reclaim/fencing, crash ambiguity, bounded repeated crash recovery,
+backpressure, SSRF/HMAC/auth/CSRF/roles/key revocation, policy pinning/rollback,
+SLO maturity and dual-window gates, incident API/audit/history pagination,
+redrive backoff reset, and shutdown drain/cancellation. Destructive fixtures reject
+non-test database names and verify the actual engine database before dropping tables.
 
-- Native Alembic migration and administrator/demo bootstrap succeeded.
-- Native smoke passed against API, signed receiver and three independent worker
-  processes: readiness, actual successful delivery, persisted HTTP 503 attempt,
-  retry recovery and metrics availability.
-- Backend: 37 pytest tests passed against the dedicated PostgreSQL test database.
-  Coverage includes concurrent idempotent ingestion, atomic rollback/capacity,
-  competing claims, lease recovery/fencing, retries/redrive, pause/failover,
-  incident deduplication, auth/CSRF/key revocation and policy promotion/rollback.
-- Backend Ruff and mypy passed after worker nullability/resource fixes.
-- Frontend: 13 Vitest tests passed; TypeScript checking and production build passed.
-  Tests cover authentication, navigation, filtering, detail rendering, forms,
-  errors/empty/loading states, incident acknowledgement and policy confirmation.
-- npm install completed with zero reported audit vulnerabilities. `.npmrc` records
-  the peer-resolution workaround needed for the installed npm dependency graph.
+## Measured and live exercises
 
-These checks do not establish Docker image execution, hosted CI, exported traces,
-browser end-to-end success or benchmark capacity. Those remain separate gates.
+The recorded k6 baseline sent 100 requests at 5/s for 20s: 100 accepted and delivered.
+Ingestion p50/p95/p99:12.49/24.60/30.03ms; delivery end-to-end p50/p95/p99:
+168.64/278.21/304.07ms. This earlier native revision is a reproducibility baseline,
+not a final-code capacity or improvement claim. See [PERFORMANCE](PERFORMANCE.md).
 
-## Verification pending
+`scripts/exercise.py` produced 20 actual 503 failures/dead letters, an automatic
+threshold incident, acknowledgement, receiver restoration, 20 successful redrives
+and resolution. `scripts/fault_modes.py` verified normal 200, intermittent 500→200,
+429 with persisted Retry-After wait, real 2s latency and timeout→recovery.
+See [INCIDENT_REPORT](INCIDENT_REPORT.md).
 
-- Broader crash/shutdown, security, policy and incident behavioral coverage
-- Requirement-by-requirement feature audit and remaining implementation
-- Browser end-to-end operation and screenshots
-- Monitoring/Compose configuration validation
-- Measured benchmark and incident evidence
-- Security and documentation reconciliation
+`scripts/failover.py` ran 2026-10-25T05:33:22–05:34:28 UTC: 30/30 events delivered while
+us-east was paused; 10 deliveries assigned there completed in the other pools.
+The finally block restored the pool and verified all pools healthy. These are
+logical processes on one host, not geographic redundancy.
 
-## Subsequent hardening evidence
+[MONITORING](MONITORING.md) records native Prometheus/Grafana/Jaeger verification.
+Committed screenshots were captured from the actual app and visually inspected.
 
-- Added a durable dispatch-intent journal and pre-I/O fencing; unknown outcomes
-  remain visible after crashes. Repeated expired claims are bounded by policy,
-  and redrive grants a fresh retry cycle without rewriting historical attempts.
-- All 40 backend tests passed after this change; Ruff and mypy passed.
-- Frozen migration DDL replaces the original migration's mutable model import.
-  Fresh migration upgrade, full downgrade and re-upgrade passed on a separate
-  native PostgreSQL database. The existing native demo also upgraded successfully.
-- The restarted native stack passed signed-delivery / 503-retry-recovery smoke.
-- Event filters now execute before database pagination. A further PostgreSQL
-  test passed for status, offset, date, project, destination and sorting behavior.
-- A real Playwright delivery/outage/recovery flow passed previously. It must be
-  rerun after the latest API/UI changes before final screenshot publication.
+## Environmental and product limits
 
-## Remaining scope audit (not completion claims)
-
-- Review every master requirement against implementation, particularly the full
-  destination editor/health/test-event flow, role-aware UI, user administration,
-  overview summaries, pool activity/failover evidence and policy comparisons.
-- Exercise sustained threshold-crossing incidents and acknowledgement/resolution,
-  timeout/rate-limit/latency scenarios and bounded graceful shutdown.
-- Review login-rate-limit storage, production destination/DNS boundary, validation,
-  tracing context propagation, telemetry freshness and secret handling.
-- Validate all launch/CI/monitoring configurations possible without Docker; do not
-  label container builds, Grafana queries or exported Jaeger traces as executed.
-- Reconcile docs and API contract with final behavior, regenerate real screenshots,
-  rerun appropriate checks, inspect repository hygiene and deliver final report.
-
-## Destination and access milestone
-
-- Implemented destination URL/subscription editing, per-destination state counts,
-  recent failed attempts and a real test event restricted to the selected
-  enabled destination. Added a dedicated Destinations navigation page.
-- Added offline account creation with hidden password input, Argon2 hashing,
-  validated roles and audit records. Login address buckets now expire and have
-  a bounded count. Deployment documentation states the per-process limit scope.
-- Added overview p99, recent events and incident count; worker views include
-  observed activity, healthy worker count, assigned work and failover attempts.
-- All 44 backend tests passed on PostgreSQL, including destination scope/security,
-  operator/viewer action boundaries and login throttling. Ruff and mypy passed.
-  Frontend lint/type checks and 13 unit tests passed. Destination UI compiled in
-  a production build; the subsequent overview additions need the final build and
-  browser revalidation along with the other pending runtime gates.
-
-## Incident and lifecycle verification
-
-- Ran `scripts/exercise.py`: twenty actual 503 failures, twenty dead letters,
-  automatic threshold-ten incident detection, acknowledgement, receiver restore,
-  twenty successful redrives retaining failed history, and incident resolution.
-- Ran `scripts/fault_modes.py`: normal, intermittent 500, rate-limit 429,
-  real two-second latency and actual timeout all verified through live workers;
-  every sample recovered. Persisted timestamps verified Retry-After scheduling.
-- Added two PostgreSQL-backed graceful-shutdown tests; both passed. They cover
-  finishing in-flight work without another claim and deadline cancellation with
-  recoverable lease state. Grace duration is now explicitly configurable.
+- Docker is absent: image builds and Compose execution were not run. Native
+  PostgreSQL 17.11 exercised the application; Compose pins PostgreSQL 16.11.
+- GitHub Actions and release publishing were not executed; no remote/push/public
+  deployment occurred. Workflow validation is not a hosted CI success claim.
+- Production JS bundle is approximately 709 KB before compression. Build succeeds;
+  route splitting is a future optimization, not a claimed implemented feature.
+- Accounts are created with the offline CLI; this is not an identity-provider or
+  full account-lifecycle administration console. Role enforcement is global to this
+  local operator console; API keys are project-scoped.
+- Audit/lab overview feeds are bounded recent-history views; incident and event
+  history support server pagination. Database history retention needs operational
+  policy. Metrics reset when a process restarts; database history remains durable.
+- Single PostgreSQL host, local logical regions and single-node trace storage do
+  not provide geographic or database high availability. Delivery is at-least-once.
+- TLS/egress controls, managed secrets, private observability, backups/restore
+  drills and deployment-specific retention/rate-limit controls are prerequisites
+  for public deployment. See SECURITY.md and RUNBOOK.md.

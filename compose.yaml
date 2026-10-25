@@ -154,16 +154,13 @@ services:
     logging: *logging
 
   jaeger:
-    image: jaegertracing/all-in-one:1.76.0
+    image: jaegertracing/jaeger:2.22.0
     restart: unless-stopped
-    environment:
-      COLLECTOR_OTLP_ENABLED: "true"
-      SPAN_STORAGE_TYPE: badger
-      BADGER_EPHEMERAL: "false"
-      BADGER_DIRECTORY_VALUE: /badger/data
-      BADGER_DIRECTORY_KEY: /badger/key
+    command: ["--config=/etc/jaeger/config.yaml"]
     ports: ["127.0.0.1:16686:16686"]
-    volumes: [jaeger-data:/badger]
+    volumes:
+      - jaeger-data:/tmp
+      - ./infrastructure/jaeger/config.yaml:/etc/jaeger/config.yaml:ro
     logging: *logging
 
 volumes:
